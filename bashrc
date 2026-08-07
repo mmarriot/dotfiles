@@ -17,6 +17,18 @@ export SCRAM_ARCH=el8_amd64_gcc13
 export EDITOR=vim
 export VISUAL=vim
 
+# -- XQuartz DISPLAY (macOS only) ----------------------------------------------
+# Some terminals (Alacritty) don't reliably inherit `launchctl setenv DISPLAY`
+# that XQuartz sets on startup, especially if the terminal was already running
+# before XQuartz launched. Pull it explicitly so `ssh -X` has somewhere to
+# forward to. No-op on the remote (Linux) box, where DISPLAY already comes
+# from sshd's X11 forwarding.
+if [[ "$OSTYPE" == darwin* && -z "$DISPLAY" ]]; then
+    _xquartz_display=$(launchctl getenv DISPLAY 2>/dev/null)
+    [[ -n "$_xquartz_display" ]] && export DISPLAY="$_xquartz_display"
+    unset _xquartz_display
+fi
+
 # -- PATH (idempotent helper: moves dir to front, no duplicate entries) --------
 _path_prepend() {
     local IFS=:
@@ -407,3 +419,5 @@ alias pbcopy=copy
 set -o vi
 
 export PATH="$HOME/.local/bin:$PATH"
+
+alias lxplus='ssh mmarriot@lxplus.cern.ch'

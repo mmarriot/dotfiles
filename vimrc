@@ -74,6 +74,12 @@ filetype plugin on
 filetype indent on
 syntax on
 
+" Metal Shading Language is a C++14 dialect - reuse cpp syntax/indent/LSP
+" rather than pulling in a dedicated plugin. clangd will flag Metal-only
+" bits (address space keywords, [[buffer(n)]] attributes) since it has no
+" metal_stdlib headers, but highlighting and basic navigation work fine.
+autocmd BufNewFile,BufRead *.metal set filetype=cpp
+
 " -- Display -------------------------------------------------------------------
 set relativenumber
 set number                  " show absolute number on current line
