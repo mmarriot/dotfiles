@@ -22,9 +22,30 @@ _path_prepend() { [[ ":$PATH:" != *":$1:"* ]] && export PATH="$1:$PATH"; }
 
 _path_prepend "/afs/cern.ch/user/m/mmarriot/tools/node/bin"
 
+# user-local tools (self-built neovim lives here: ~/.local/bin/nvim)
+_path_prepend "$HOME/.local/bin"
+
 _path_prepend "/afs/cern.ch/cms/caf/scripts"
 _path_prepend "/cvmfs/cms.cern.ch/share/x86_64/cms/prmon/v2026022600/bin"
 _path_prepend "/cvmfs/cms.cern.ch/common"
+
+
+# ==============================================================================
+#  CACHES -> /eos
+#  $HOME is AFS with a hard 10G quota; build/download caches refill it fast and
+#  push it to 95%. Point the big cache-producers at EOS (~1T free) instead.
+#  Guarded on EOS being mounted, so nothing breaks if it isn't; each tool
+#  falls back to its default (~/.cache etc.) in that case.
+# ==============================================================================
+
+if [ -d /eos/user/m/mmarriot ]; then
+    export XDG_CACHE_HOME="/eos/user/m/mmarriot/.cache"   # pip, nvim, matplotlib, opencode, ...
+    export npm_config_cache="$XDG_CACHE_HOME/npm"
+    export GOCACHE="$XDG_CACHE_HOME/go-build"
+    export CCACHE_DIR="$XDG_CACHE_HOME/ccache"
+    export CUDA_CACHE_PATH="$XDG_CACHE_HOME/nv"           # CUDA JIT cache (was ~/.nv)
+    mkdir -p "$npm_config_cache" "$GOCACHE" "$CCACHE_DIR" "$CUDA_CACHE_PATH" 2>/dev/null
+fi
 
 
 # ==============================================================================
@@ -53,6 +74,60 @@ shopt -s cdspell        # auto-correct minor cd typos
 shopt -s autocd         # bare directory name -> cd into it
 shopt -s globstar       # ** recursive glob
 shopt -s direxpand      # expand variables in directory completion
+
+
+# ==============================================================================
+#  VI MODE  (vim motions on the command line)
+#
+#  <Esc> or `jk` leaves insert mode; then w/b/e/0/$/f/t, ci", di', yy/p, u and
+#  friends work as in vim. `v` in command mode drops the whole line into $EDITOR
+#  and runs what you save.
+#
+#  The mode is shown in front of the prompt character: green [i] = insert,
+#  pink [n] = normal, so you never guess which mode ate your keystroke.
+#
+#  Configured with `bind` rather than ~/.inputrc on purpose - an inputrc would
+#  put every other readline program (python, gdb, psql) into vi mode too.
+#
+#  This block must stay ABOVE the fzf section: fzf's key-bindings.bash checks
+#  the editing mode when it is sourced, and only installs its Ctrl-R/Ctrl-T
+#  bindings into the vi keymaps if vi mode is already on.
+# ==============================================================================
+
+set -o vi
+
+# `jk` as a second <Esc>, for when <Esc> is being eaten by ssh/tmux latency
+bind -m vi-insert '"jk": vi-movement-mode'
+
+# How long readline waits for the rest of an escape sequence. The 500ms default
+# makes <Esc> feel laggy. Not lower than this: over a laggy ssh hop an arrow key
+# can arrive split across packets, and then \e[A decays into <Esc> then "[A".
+bind 'set keyseq-timeout 50'
+
+# Mode indicator: [i]/[n] before the prompt char, plus a bar/block cursor - the
+# same cue vim gives. \1..\2 marks the escapes as zero-width, otherwise readline
+# miscounts the prompt length and wraps long lines wrongly.
+bind 'set show-mode-in-prompt on'
+bind 'set vi-ins-mode-string "\1\e[6 q\e[38;5;114m\2[i]\1\e[0m\2 "'
+bind 'set vi-cmd-mode-string "\1\e[2 q\e[38;5;205m\2[n]\1\e[0m\2 "'
+
+# Show completions on the first Tab instead of requiring a second one, and keep
+# the vi keymaps in sync about it.
+bind 'set show-all-if-ambiguous on'
+bind 'set completion-ignore-case on'
+
+# A few emacs keys kept alive in insert mode - too much muscle memory to lose.
+# (Ctrl-E is deliberately absent: it is the fzf-open-vim widget below.)
+bind -m vi-insert '"\C-a": beginning-of-line'
+bind -m vi-insert '"\C-k": kill-line'
+bind -m vi-insert '"\C-p": previous-history'
+bind -m vi-insert '"\C-n": next-history'
+
+# Up/Down search history by what you have already typed, in both modes
+bind -m vi-insert '"\e[A": history-search-backward'
+bind -m vi-insert '"\e[B": history-search-forward'
+bind -m vi-command '"\e[A": history-search-backward'
+bind -m vi-command '"\e[B": history-search-forward'
 
 
 # ==============================================================================
@@ -190,7 +265,9 @@ fzf-cmssw-widget() {
         READLINE_POINT=$(( READLINE_POINT + ${#inserted} ))
     fi
 }
-bind -x '"\C-f": fzf-cmssw-widget'
+# bound into both vi keymaps, otherwise it only fires in insert mode
+bind -m vi-insert -x '"\C-f": fzf-cmssw-widget'
+bind -m vi-command -x '"\C-f": fzf-cmssw-widget'
 
 # Ctrl+E: fuzzy-open a file in vim directly (works anywhere)
 fzf-open-vim() {
@@ -198,7 +275,8 @@ fzf-open-vim() {
     file=$(find . -type f -not -path "*/\.*" 2>/dev/null | fzf --prompt="open> ")
     [[ -n "$file" ]] && ${EDITOR:-vim} "$file"
 }
-bind -x '"\C-e": fzf-open-vim'
+bind -m vi-insert -x '"\C-e": fzf-open-vim'
+bind -m vi-command -x '"\C-e": fzf-open-vim'
 
 
 # ==============================================================================
@@ -392,5 +470,3 @@ copy() {
     fi
 }
 alias pbcopy=copy
-
-export PATH="$HOME/.local/bin:$PATH"

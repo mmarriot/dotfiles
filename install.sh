@@ -29,6 +29,7 @@ link bashrc        .bashrc
 link gitconfig     .gitconfig
 link config/tmux   .config/tmux
 link config/git    .config/git
+link config/nvim   .config/nvim
 
 # -- vim-plug --------------------------------------------------------------
 if [[ ! -f "$HOME/.vim/autoload/plug.vim" ]]; then
@@ -43,7 +44,68 @@ if [[ ! -d "$HOME/.tmux/plugins/tpm" ]]; then
     git clone https://github.com/tmux-plugins/tpm "$HOME/.tmux/plugins/tpm"
 fi
 
+# -- neovim language servers & tools ----------------------------------------
+# clangd/clang-format/clang-tidy come from `cmsenv` (CVMFS) - not installed here.
+# The rest are single static (musl) binaries - no glibc dependency, no conda
+# dependency trees (this AFS home has a 10 GB quota). Binaries live on /data
+# (roomy) and are symlinked into ~/.local/bin so AFS usage stays near zero.
+mkdir -p "$HOME/.local/bin"
+TOOLS_BIN="/data/mmarriot/tools/bin"
+mkdir -p "$TOOLS_BIN"
+
+# pyright (Python LSP) - node app, no native binary
+if ! command -v pyright-langserver >/dev/null 2>&1; then
+    echo "installing pyright (npm)"
+    npm install -g pyright >/dev/null 2>&1 || echo "  ! pyright install failed (check node/npm)"
+fi
+
+# latest musl/static asset URL for a github repo matching a grep pattern
+gh_asset() {
+    curl -fsSL "https://api.github.com/repos/$1/releases/latest" \
+        | grep -o '"browser_download_url": *"[^"]*"' \
+        | sed 's/.*"\(https[^"]*\)"/\1/' | grep -E "$2" | head -1
+}
+
+install_static() {   # name  repo  asset-pattern  [tar-inner-path]
+    local name="$1" repo="$2" pat="$3" inner="${4:-}"
+    command -v "$name" >/dev/null 2>&1 && return
+    local url; url="$(gh_asset "$repo" "$pat")"
+    [[ -z "$url" ]] && { echo "  ! $name: no matching asset"; return; }
+    echo "installing $name ($url)"
+    local tmp; tmp="$(mktemp -d)"
+    if [[ "$url" == *.tar.gz ]]; then
+        curl -fsSL "$url" -o "$tmp/a.tgz" && tar -xzf "$tmp/a.tgz" -C "$tmp"
+        local bin; bin="$(find "$tmp" -type f -name "$name" | head -1)"
+        [[ -n "$bin" ]] && cp "$bin" "$TOOLS_BIN/$name"
+    else
+        curl -fsSL "$url" -o "$TOOLS_BIN/$name"
+    fi
+    rm -rf "$tmp"
+    [[ -f "$TOOLS_BIN/$name" ]] && chmod +x "$TOOLS_BIN/$name" \
+        && ln -sf "$TOOLS_BIN/$name" "$HOME/.local/bin/$name"
+}
+
+install_static ruff    astral-sh/ruff        'ruff-x86_64-unknown-linux-musl\.tar\.gz$'
+install_static rg      BurntSushi/ripgrep    'x86_64-unknown-linux-musl\.tar\.gz$'
+install_static fd      sharkdp/fd            'x86_64-unknown-linux-musl\.tar\.gz$'
+install_static lazygit jesseduffield/lazygit 'inux_x86_64\.tar\.gz$'
+install_static viu     atanunq/viu           'viu-x86_64-unknown-linux-musl$'
+
+# -- neovim plugins (lazy.nvim) + treesitter parsers ------------------------
+# Parsers are compiled synchronously here; the plugin's own async :TSUpdate can
+# be cut short by the headless session exiting, leaving c/cpp/etc. missing.
+if command -v nvim >/dev/null 2>&1; then
+    echo "syncing neovim plugins (lazy.nvim)"
+    nvim --headless "+Lazy! sync" +qa 2>/dev/null || true
+    echo "compiling treesitter parsers (c/cpp/cuda ...)"
+    nvim --headless -c 'lua require("lazy").load({plugins={"nvim-treesitter"}})' \
+        -c "TSInstallSync c cpp cuda cmake python lua vim vimdoc bash markdown markdown_inline json yaml rust comment query gitignore diff" \
+        -c "qa" 2>/dev/null || true
+fi
+
 echo
 echo "Done. Next steps:"
 echo "  vim  -> :PlugInstall"
 echo "  tmux -> prefix + I   (installs tmux plugins)"
+echo "  nvim -> launch inside a cmsenv so clangd attaches; :checkhealth to verify"
+echo "  images -> 'viu <file.png>' in a tmux pane (Ghostty kitty-protocol, over ssh)"
