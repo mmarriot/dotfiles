@@ -22,12 +22,21 @@ _path_prepend() { [[ ":$PATH:" != *":$1:"* ]] && export PATH="$1:$PATH"; }
 
 _path_prepend "/afs/cern.ch/user/m/mmarriot/tools/node/bin"
 
-# user-local tools (self-built neovim lives here: ~/.local/bin/nvim)
+# user-local tools
 _path_prepend "$HOME/.local/bin"
+_path_prepend "$HOME/bin"
+_path_prepend "$HOME/bin"
 
 _path_prepend "/afs/cern.ch/cms/caf/scripts"
 _path_prepend "/cvmfs/cms.cern.ch/share/x86_64/cms/prmon/v2026022600/bin"
 _path_prepend "/cvmfs/cms.cern.ch/common"
+
+# CUDA toolkit: nvcc, ncu, nsys, cuda-gdb, compute-sanitizer.
+# /usr/local/cuda is a symlink to the current default (12.9 today), so this
+# follows toolkit upgrades. Guarded because this bashrc is shared over AFS with
+# machines that have no GPU/toolkit. No LD_LIBRARY_PATH needed - the CUDA libs
+# are already in /etc/ld.so.conf.d, so ldconfig finds them.
+[ -d /usr/local/cuda/bin ] && _path_prepend "/usr/local/cuda/bin"
 
 
 # ==============================================================================
@@ -39,7 +48,7 @@ _path_prepend "/cvmfs/cms.cern.ch/common"
 # ==============================================================================
 
 if [ -d /eos/user/m/mmarriot ]; then
-    export XDG_CACHE_HOME="/eos/user/m/mmarriot/.cache"   # pip, nvim, matplotlib, opencode, ...
+    export XDG_CACHE_HOME="/eos/user/m/mmarriot/.cache"   # pip, matplotlib, opencode, ...
     export npm_config_cache="$XDG_CACHE_HOME/npm"
     export GOCACHE="$XDG_CACHE_HOME/go-build"
     export CCACHE_DIR="$XDG_CACHE_HOME/ccache"
@@ -84,7 +93,7 @@ shopt -s direxpand      # expand variables in directory completion
 #  and runs what you save.
 #
 #  The mode is shown in front of the prompt character: green [i] = insert,
-#  pink [n] = normal, so you never guess which mode ate your keystroke.
+#  [n] in the accent colour = normal, so you never guess which mode ate your keystroke.
 #
 #  Configured with `bind` rather than ~/.inputrc on purpose - an inputrc would
 #  put every other readline program (python, gdb, psql) into vi mode too.
@@ -108,8 +117,8 @@ bind 'set keyseq-timeout 50'
 # same cue vim gives. \1..\2 marks the escapes as zero-width, otherwise readline
 # miscounts the prompt length and wraps long lines wrongly.
 bind 'set show-mode-in-prompt on'
-bind 'set vi-ins-mode-string "\1\e[6 q\e[38;5;114m\2[i]\1\e[0m\2 "'
-bind 'set vi-cmd-mode-string "\1\e[2 q\e[38;5;205m\2[n]\1\e[0m\2 "'
+bind 'set vi-ins-mode-string "\1\e[6 q\e[32m\2[i]\1\e[0m\2 "'
+bind 'set vi-cmd-mode-string "\1\e[2 q\e[95m\2[n]\1\e[0m\2 "'
 
 # Show completions on the first Tab instead of requiring a second one, and keep
 # the vi keymaps in sync about it.
@@ -139,23 +148,23 @@ bind -m vi-command '"\e[B": history-search-forward'
 #  [CMSSW_14_1_0 ok]  ~/src/DataFormats   (git)  main *
 #  >
 #
-#  Colours: uses 256-colour escapes so it works in any xterm-256color terminal.
+#  Colours: the 16 terminal palette colours, so Ghostty's theme sets the shades.
 
 __prompt_build() {
     local exit_code=$?      # capture FIRST - must be before anything else
 
     # -- colour palette ---------------------------------------------------------
-    # Same as Alacritty/vim/tmux: black bg, one pink accent, grey for structure.
-    # Red/green/yellow are kept but used ONLY for genuine status (error/ok/dirty),
+    # Same palette as Ghostty/vim/tmux (Ghostty sets the shades): one accent, grey for
+    # structure. Red/green/yellow are used ONLY for genuine status (error/ok/dirty),
     # never for decoration - that's what made the old prompt feel busy.
     local reset='\[\e[0m\]'
     local bold='\[\e[1m\]'
-    local red='\[\e[38;5;203m\]'
-    local green='\[\e[38;5;114m\]'
-    local yellow='\[\e[38;5;179m\]'
-    local pink='\[\e[38;5;205m\]'
-    local gray='\[\e[38;5;245m\]'
-    local white='\[\e[38;5;253m\]'
+    local red='\[\e[31m\]'
+    local green='\[\e[32m\]'
+    local yellow='\[\e[33m\]'
+    local accent='\[\e[95m\]'
+    local gray='\[\e[37m\]'
+    local text='\[\e[39m\]'
 
     # -- CMSSW zone ------------------------------------------------------------
     local cms_zone=""
@@ -164,9 +173,9 @@ __prompt_build() {
         release=$(basename "$CMSSW_BASE")
         # Check whether cwd is actually inside this CMSSW tree
         if [[ "$PWD" == "$CMSSW_BASE"* ]]; then
-            cms_zone="${gray}[${pink}${release}${green} ok${gray}]${reset} "
+            cms_zone="${gray}[${accent}${release}${green} ok${gray}]${reset} "
         else
-            cms_zone="${gray}[${pink}${release}${yellow} ~${gray}]${reset} "
+            cms_zone="${gray}[${accent}${release}${yellow} ~${gray}]${reset} "
         fi
     fi
 
@@ -176,7 +185,7 @@ __prompt_build() {
     if [[ -n "$CMSSW_BASE" ]]; then
         dir="${dir/#${CMSSW_BASE}\/src/@cms}"
     fi
-    local path_zone="${white}${dir}${reset}"
+    local path_zone="${text}${dir}${reset}"
 
     # -- git zone --------------------------------------------------------------
     local git_zone=""
@@ -188,7 +197,7 @@ __prompt_build() {
             git_status=$(git status --porcelain 2>/dev/null)
             local dirty=""
             [[ -n "$git_status" ]] && dirty="${yellow} *${reset}"
-            git_zone="  ${gray}  ${pink}${branch}${dirty}${reset}"
+            git_zone="  ${gray}  ${accent}${branch}${dirty}${reset}"
         fi
     fi
 
@@ -237,10 +246,8 @@ export FZF_DEFAULT_OPTS="
   --pointer='>'
   --marker='*'
   --separator=''
-  --color=fg:#e6e6e6,bg:-1,hl:#ff6ac1
-  --color=fg+:#ffffff,bg+:#1a1a1a,hl+:#ff6ac1
-  --color=info:#828282,prompt:#ff6ac1,pointer:#ff6ac1
-  --color=marker:#7ecb8f,spinner:#7ecb8f,header:#828282
+  --color=light,fg:-1,bg:-1,hl:13,fg+:-1,bg+:#cfc7b8,hl+:13,gutter:-1
+  --color=info:7,prompt:13,pointer:13,marker:2,spinner:2,header:7
 "
 
 # Ctrl+T: fuzzy-insert any file path at cursor
@@ -441,7 +448,7 @@ man() {
     LESS_TERMCAP_md=$'\e[1;36m' \
     LESS_TERMCAP_me=$'\e[0m'    \
     LESS_TERMCAP_se=$'\e[0m'    \
-    LESS_TERMCAP_so=$'\e[1;44;33m' \
+    LESS_TERMCAP_so=$'\e[7;35m' \
     LESS_TERMCAP_ue=$'\e[0m'    \
     LESS_TERMCAP_us=$'\e[1;32m' \
     command man "$@"
@@ -470,3 +477,22 @@ copy() {
     fi
 }
 alias pbcopy=copy
+
+
+export PIXI_HOME="/data/mmarriot/bin/pixi"
+export PIXI_CACHE_DIR="/data/mmarriot/cache/pixi-cache"
+# export TMPDIR="/data/mmarriot/tmp"
+# mkdir -p "$PIXI_CACHE_DIR" "$TMPDIR"
+
+export PATH="/data/mmarriot/bin/pixi/bin:$PATH"   # (already there)
+#eval "$(pixi completion --shell bash)"
+
+# ==============================================================================
+#  mkbench: put the CMSSW benchmark script into the current release
+#  master copy: ~/tools/bench/bench.py   inputs: /eos/user/m/mmarriot/bench_inputs
+# ==============================================================================
+mkbench() {
+    [[ -z "$CMSSW_BASE" ]] && { echo "mkbench: run cmsenv first"; return 1; }
+    mkdir -p "$CMSSW_BASE/bench" && cp ~/tools/bench/bench.py "$CMSSW_BASE/bench/" \
+        && echo "ready: cd \$CMSSW_BASE/bench && ./bench.py run hlt"
+}

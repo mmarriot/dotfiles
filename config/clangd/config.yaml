@@ -1,0 +1,9 @@
+# CMSSW areas, the release and externals on /cvmfs: find CMSSW's gcc.
+# The compile DB passes --gcc-toolchain=/cvmfs/.../gcc/<v>, whose files sit under
+# lib/gcc/x86_64-redhat-linux-gnu/<v>. Pixi's clangd targets x86_64-conda-linux-gnu
+# and never looks under that triple, so <cstdint> etc. aren't found and every
+# type after the first #include is broken. Works for any gcc version / arch.
+If:
+  PathMatch: ['.*/CMSSW_[^/]+/.*', '/cvmfs/cms\.cern\.ch/.*']
+CompileFlags:
+  Add: [--target=x86_64-redhat-linux-gnu]

@@ -1,819 +1,656 @@
-" ==============================================================================
-"  ~/.vimrc
-" ==============================================================================
+" ~/.vimrc - small on purpose. Vim 9.2 (pixi global install vim), leader is space.
+"
+" Plugins: fzf (find files / grep), fugitive + gitgutter (git), vim-lsp (clangd),
+"          oscyank (yanks go to your local clipboard over ssh),
+"          floaterm (Ctrl-g toggles a floating terminal; the shell keeps running;
+"                    Ctrl-q in it to scroll/search its history, i to type again),
+"          dirvish (oil-style file browser, see below).
+"
+" Going to definitions (works across CMSSW, alpaka and CLUEstering):
+"   Ctrl-]    jump to tag under cursor   Ctrl-t  jump back   g]  list all matches
+"   :MakeTags index $CMSSW_BASE/src + external headers -> $CMSSW_BASE/tags
+"   gd gr K   clangd definition / references / hover. gy  jump to the type of
+"             the thing under the cursor. <leader>th  toggle inline types. clangd is from pixi
+"             (clang-tools); it needs a compile_commands.json in or above the
+"             file: `scram b llvm-ccdb` in CMSSW, CMAKE_EXPORT_COMPILE_COMMANDS
+"             in CMake projects (symlink it next to CMakeLists.txt)
+"             Python (pyright) and TS/JS (typescript-language-server) get the same keys;
+"             a TS project takes a few seconds to load, until then K/gd only see the import
+"   Completion pops up as you type: Tab/S-Tab move, Enter accepts, keep typing to ignore
+"   gf        open #include under cursor (also alpaka/..., CLUEstering/...)
+"
+" Files and search (same CMSSW src + externals set; plain cwd outside CMSSW):
+"   <leader>ff  files       <leader>fg  grep       <leader>*  grep word under cursor
+"   <leader>fb  buffers     <leader>fh  recent files
+"
+" Git:  <leader>gs status  <leader>gb blame  <leader>gd diff  <leader>gl file log
+"       ]c [c next/prev hunk   <leader>hs stage hunk   <leader>hu undo   <leader>hp preview
+"       :Review HEAD~2  browse what changed since HEAD~2 (see "Reviewing changes")  :ReviewOff
+"       :Changes  explorer tags and gutter signs only, no diffs  :ChangesOff
+"
+" Files (dirvish): <leader>e or -  open the current file's directory, cursor on it
+"   Enter open   -  up a level   o/a  open in split/vsplit   R  reload   gq  close
+"   %  new file (name/ for a directory)   r  rename/move   D  delete (also in Visual)
+"   A directory is a plain buffer of paths, so / searches it and :Shdo mv/rm/...
+"   runs a shell command on the listed (or visually selected) lines.
+"
+" Ask Claude (vim-ask, ~/src/vim-ask): select code, then
+"   <leader>i  explain it (opus, low)   <leader>p  pick a saved prompt (deep: opus, high)
+"   <leader>I  type a question, Claude can search the codebase (opus, medium)
+"              (-deep in front to use that saved prompt instead: no search)
+"   <leader>R  code review of the selection + the file's uncommitted git diff (opus, medium)
+"   the language server's types go with the question; the answer pops up beside the code and stays there
+"   <leader>o  go into the nearest answer: j/k scroll, f follow up, m minimise, Esc leave, q close
+"   answers scroll with the code and go when the file is closed (or :AskClose)
+"   :AskModel / :AskEffort  switch model or effort (no argument: menu)   :help ask
+"   :AskPrompt [name]  edit a saved prompt for this session; g:ask_prompts to keep it
+"
+" Machine code (vim-cmssw, ~/src/vim-cmssw): in a CMSSW C++ file
+"   <leader>ca  pane with the SASS (kernel lines) or x86 of the file; it follows the cursor
+"               both ways. In the pane: t next target, <CR> source line, gd inlined header, q close
+"   ]a [a       next/previous block of the current line's instructions
+"   <leader>cy  yank the line(s) with their instructions
+"   <leader>ce  ask Claude how this C++ becomes these instructions (vim-ask's asm prompt, opus high)
+"   <leader>cE  pick which asm* prompt to ask (they're in g:ask_prompts below); <leader>o goes into
+"               the answer, from the pane too
+"   <leader>cg  rebuild just this file with -g so x86 has line tables (:CmsDebugLog)   :help cmssw
 
+" cmsenv sets LANG=C, which would make Vim latin1 and lose every non-ASCII character
+set encoding=utf-8
 
-" -- Leader --------------------------------------------------------------------
-let mapleader = " "
-
-
-" ==============================================================================
-"  PLUGINS  (vim-plug)
-" ==============================================================================
+let mapleader = ' '
 
 call plug#begin()
-
-" -- Editor behaviour ----------------------------------------------------------
-Plug 'RRethy/vim-illuminate'          " highlight other uses of word under cursor
-Plug 'tpope/vim-commentary'           " gc / gcc to comment lines
-Plug 'tpope/vim-surround'             " cs\"' to change surrounding quotes etc.
-Plug 'jiangmiao/auto-pairs'           " auto-close brackets, quotes
-
-" -- File navigation -----------------------------------------------------------
-Plug 'justinmk/vim-dirvish'           " the file explorer: netrw-style, - to go up (see FILE EXPLORER)
 Plug 'junegunn/fzf', { 'do': { -> fzf#install() } }
 Plug 'junegunn/fzf.vim'
-
-" -- Git -----------------------------------------------------------------------
-Plug 'tpope/vim-fugitive'             " full git workflow inside vim
-Plug 'airblade/vim-gitgutter'         " per-line diff signs + hunk staging
-
-" -- Clipboard (see CLIPBOARD section below) ------------------------------------
-Plug 'ojroques/vim-oscyank', {'branch': 'main'}
-
-" -- Completion & LSP (works on any vim 8+, no version requirement) -----------
+Plug 'tpope/vim-fugitive'
+Plug 'airblade/vim-gitgutter'
 Plug 'prabirshrestha/vim-lsp'
-Plug 'mattn/vim-lsp-settings'          " auto-installs language servers (clangd, pyright)
-Plug 'prabirshrestha/asyncomplete.vim'
-Plug 'prabirshrestha/asyncomplete-lsp.vim'
-Plug 'preservim/vim-markdown'
-
+Plug 'prabirshrestha/asyncomplete.vim'       " completion pop-up as you type
+Plug 'prabirshrestha/asyncomplete-lsp.vim'   " ...fed by clangd (paths: s:PathComplete)
+Plug 'ojroques/vim-oscyank', {'branch': 'main'}
+Plug 'voldikss/vim-floaterm'
+Plug 'justinmk/vim-dirvish'
+Plug '~/src/vim-ask'                         " select code, ask Claude about it
+Plug '~/src/vim-cmssw'                       " SASS / x86 of the line you're reading
 call plug#end()
 
-" Auto-pairs: disable space padding inside brackets (causes the dot-on-space bug)
-let g:AutoPairsMapSpace = 0
-let g:AutoPairsMultilineClose = 0
+" -- Settings ------------------------------------------------------------------
+set number relativenumber cursorline signcolumn=yes
+set expandtab shiftwidth=2 tabstop=2 colorcolumn=120   " CMSSW .clang-format
+set nowrap scrolloff=8 splitbelow splitright hidden
+set incsearch hlsearch ignorecase smartcase
+set wildmenu wildmode=list:longest,full
+set noswapfile nobackup                                 " home is on AFS
+set updatetime=300                                      " gitgutter refresh
+set backspace=indent,eol,start
+set diffopt-=inline:char diffopt+=inline:word            " mark whole changed words, not scattered letters
+set ttimeout ttimeoutlen=50                             " no lag after Esc
+set laststatus=2
+set statusline=\ %f\ %m%r%{FugitiveHead()!=''?'\ \ ('.FugitiveHead().')':''}%=%y\ %l:%c
 
+" -- Colours ---------------------------------------------------------------------
+" True colour: tmux passes it on once tmux.conf has the Tc override. The two
+" escape codes tell vim how to send 24-bit colours when TERM is screen-256color.
+set termguicolors
+let &t_8f = "\<Esc>[38;2;%lu;%lu;%lum"
+let &t_8b = "\<Esc>[48;2;%lu;%lu;%lum"
+" Modus Dusk: Modus colours on a dimmed paper background, same palette as
+" Ghostty and tmux. Schemes live in dotfiles/vim/colors (also: modus_tinted,
+" brighter; gruvbox_soft, warmer).
+colorscheme modus_dusk
 
-" ==============================================================================
-"  CORE SETTINGS
-" ==============================================================================
+" Cursor: Ghostty draws it (red, from its config); vim only picks the shape.
+" Steady block in normal mode, bar in insert, underline in replace, and back to
+" Ghostty's default (steady block) on exit.
+let &t_te .= "\<Esc>[0 q"
+let &t_EI = "\<Esc>[2 q"
+let &t_SI = "\<Esc>[6 q"
+let &t_SR = "\<Esc>[4 q"
 
-" ==============================================================================
-"  MARKDOWN
-" ==============================================================================
+" -- Floating terminal -------------------------------------------------------------
+" Ctrl-g opens it, and hides it again from inside (the shell keeps running).
+let g:floaterm_keymap_toggle = '<C-g>'
+let g:floaterm_width = 0.85
+let g:floaterm_height = 0.85
+" Scrollback (shell output, Claude chats): Ctrl-q freezes the terminal into a
+" read-only vim buffer - Ctrl-u/d, gg/G, / ? n N, v + y (to your clipboard).
+" i or a goes back to typing. The mouse wheel can't scroll a vim popup.
+tnoremap <C-q> <C-\><C-n>
+set termwinscroll=50000                                 " default 10000 lines
 
-let g:vim_markdown_folding_disabled = 1       " folding can be disorienting, off by default
-let g:vim_markdown_conceal = 0                " set to 1 if you want live rendering of **bold** etc.
-let g:vim_markdown_conceal_code_blocks = 0
-let g:vim_markdown_new_list_item_indent = 0   " don't over-indent new list items
-let g:vim_markdown_auto_insert_bullets = 1    " the key feature: auto-continue lists
-let g:vim_markdown_frontmatter = 1            " highlight YAML front matter (useful for Hugo)
-
-" Tab/S-Tab to indent/unindent list items in insert mode
-autocmd FileType markdown inoremap <buffer> <Tab>   <Esc>>>A
-autocmd FileType markdown inoremap <buffer> <S-Tab> <Esc><<A
-
-" And in normal mode for consistency
-autocmd FileType markdown nnoremap <buffer> <Tab>   >>
-autocmd FileType markdown nnoremap <buffer> <S-Tab> <<
-
-" -- Filetype & syntax ---------------------------------------------------------
-filetype on
-filetype plugin on
-filetype indent on
-syntax on
-
-" -- Display -------------------------------------------------------------------
-set relativenumber
-set number                  " show absolute number on current line
-set cursorline
-set scrolloff=8             " keep 8 lines above/below cursor when scrolling
-set signcolumn=yes          " always show gutter (no layout jump when signs appear)
-set nowrap
-set colorcolumn=100         " soft column guide at 100 chars (common in CMSSW)
-set showmatch               " briefly jump to matching bracket
-
-" -- Indentation ---------------------------------------------------------------
-set shiftwidth=4
-set tabstop=4
-set expandtab
-set autoindent
-set smartindent
-
-" -- Paste fix ----------------------------------------------------------------
-" F2 toggles paste mode - stops autoindent cascading when pasting from outside
-set pastetoggle=<F2>
-
-" -- Search --------------------------------------------------------------------
-set incsearch
-set hlsearch
-set ignorecase
-set smartcase               " case-sensitive only if query has uppercase
-
-" -- Buffers & files -----------------------------------------------------------
-set hidden                  " switch buffers without saving
-set nobackup
-set nowritebackup
-set noswapfile
-set autoread                " reload file if changed outside vim
+" -- Reload files changed on disk ------------------------------------------------
+" Git checkouts or edits made from the floating terminal: unmodified buffers
+" reload silently, modified ones still prompt. CursorHold covers hiding the
+" floaterm popup, which doesn't always fire BufEnter.
+set autoread
+augroup vimrc_autoread
+  autocmd!
+  autocmd FocusGained,BufEnter,WinEnter,CursorHold * if mode() !=# 'c' && getcmdwintype() ==# '' | checktime | endif
+augroup END
 
 " -- Clipboard -------------------------------------------------------------------
-" This box has no +clipboard/+xterm_clipboard (no X server), so
-" 'clipboard=unnamedplus' is a silent no-op here. Instead, every yank/delete
-" of the unnamed register is pushed to the Mac's system clipboard via an
-" OSC52 terminal escape sequence (ojroques/vim-oscyank). OSC52 travels over
-" plain SSH - no X11 forwarding needed - and tmux forwards it through
-" automatically because 'set-clipboard on' is set in tmux.conf. Needs a
-" terminal that honours OSC52 (iTerm2, Alacritty, Kitty, WezTerm all do).
+" No X server here, so no +clipboard. Every yank/delete is sent to your local
+" clipboard as an OSC52 escape sequence instead; it travels over plain ssh and
+" through tmux (set-clipboard on).
 let g:oscyank_silent = 1
-if !has('nvim') && !has('clipboard_working')
-    let s:oscyank_registers = ['', '+', '*']
-    let s:oscyank_operators = ['y', 'd']
-    function! s:OscyankOnTextYank(event) abort
-        if index(s:oscyank_registers, a:event.regname) != -1
-            \ && index(s:oscyank_operators, a:event.operator) != -1
-            call OSCYankRegister(a:event.regname)
-        endif
-    endfunction
-    augroup oscyank_auto_copy
-        autocmd!
-        autocmd TextYankPost * call s:OscyankOnTextYank(v:event)
-    augroup END
-endif
-
-" -- Splits open naturally -----------------------------------------------------
-set splitbelow
-set splitright
-
-" -- Auto-equalize split sizes --------------------------------------------------
-" Re-equalize on every new window/resize so splits stay evenly sized instead
-" of drifting odd as panes open and close. Windows with winfixheight set
-" (the terminal toggle below) stay exempt.
-augroup auto_equalize_splits
-    autocmd!
-    autocmd VimResized,WinNew * wincmd =
+augroup vimrc_oscyank
+  autocmd!
+  autocmd TextYankPost * if index(['y', 'd'], v:event.operator) >= 0 && index(['', '+', '*'], v:event.regname) >= 0
+        \ | call OSCYankRegister(v:event.regname) | endif
 augroup END
 
-" -- Performance ---------------------------------------------------------------
-set lazyredraw
-set ttyfast
-set updatetime=300          " faster sign updates (gitgutter, lsp)
-
-" -- Command line completion ---------------------------------------------------
-set wildmenu
-set wildmode=list:longest,full
-set wildignore+=*.o,*.so,*.pyc,*/.git/*,*/build/*,*/tmp/*
-
-
-
-" ==============================================================================
-"  COLOURS  -  plain built-in scheme, black background, pink accent
-"
-"  Palette (matches Alacritty + tmux + bashrc so every surface agrees):
-"    black  ctermbg=black / 234   background & subtle panels
-"    grey   239 / 245             structure: line numbers, splits, dim text
-"    pink   205                   the ONE accent - cursor line, selection,
-"                                  search, current-window/identity markers
-"    red 203 / green 114 / yellow 179   functional only (errors/added/warn)
-"  Left as plain built-in highlighting (no colorscheme plugin, no
-"  truecolour) - just pinning every group that otherwise falls back to a
-"  mismatched default.
-" ==============================================================================
-
-set background=dark
-colorscheme default
-
-" -- Core surfaces --------------------------------------------------------------
-hi Normal      ctermbg=black ctermfg=253
-hi NonText     ctermbg=black ctermfg=239        " ~ at end of buffer, no longer stark white
-hi EndOfBuffer ctermbg=black ctermfg=239
-hi ColorColumn ctermbg=234                       " barely-there dark grey guide at colorcolumn
-hi CursorLine  cterm=none ctermbg=234
-hi VertSplit   ctermbg=black ctermfg=239
-hi WinSeparator ctermbg=black ctermfg=239
-
-" -- Gutter (this is what was showing as a stray white-ish column) --------------
-hi SignColumn    ctermbg=black
-hi LineNr        ctermbg=black ctermfg=239
-hi CursorLineNr  ctermbg=234   ctermfg=205 cterm=bold   " pink - marks your line
-
-" -- Selection / search - mirrors Alacritty's pink selection --------------------
-hi Visual   ctermbg=239 ctermfg=253
-hi Search   ctermbg=205 ctermfg=black
-hi IncSearch ctermbg=205 ctermfg=black
-hi MatchParen ctermbg=239 ctermfg=205 cterm=bold
-
-" -- Popup / completion menu -----------------------------------------------------
-hi Pmenu     ctermbg=234 ctermfg=253
-hi PmenuSel  ctermbg=205 ctermfg=black
-hi PmenuSbar ctermbg=234
-hi PmenuThumb ctermbg=239
-
-" -- Misc built-ins ---------------------------------------------------------------
-hi Comment   ctermfg=239
-hi Special   ctermfg=239          " quiet grey instead of the loud default pink-ish highlight
-hi Directory ctermfg=205 cterm=bold
-hi Question  ctermfg=205
-hi StatusLine   ctermbg=234 ctermfg=253 cterm=none
-hi StatusLineNC ctermbg=234 ctermfg=239 cterm=none
-
-" -- Diff / gitgutter - keep functional colour, but from the shared palette ------
-hi DiffAdd    ctermbg=234 ctermfg=114
-hi DiffChange ctermbg=234 ctermfg=179
-hi DiffDelete ctermbg=234 ctermfg=203
-hi DiffText   ctermbg=234 ctermfg=205
-hi GitGutterAdd          ctermbg=black ctermfg=114
-hi GitGutterChange       ctermbg=black ctermfg=179
-hi GitGutterDelete       ctermbg=black ctermfg=203
-hi GitGutterChangeDelete ctermbg=black ctermfg=179
-
-" -- LSP diagnostics - same functional colours as gitgutter/git diff -------------
-hi LspErrorHighlight       ctermfg=203
-hi LspWarningHighlight     ctermfg=179
-hi LspInformationHighlight ctermfg=239
-hi LspHintHighlight        ctermfg=239
-hi LspErrorText            ctermfg=203
-hi LspWarningText          ctermfg=179
-
-" Thin bar cursor in every mode (Vim's default block in normal mode
-" overrides the terminal's own cursor style via DECSCUSR) - matches the
-" thin-line beam cursor set in the Alacritty config.
-set guicursor=a:ver25-blinkon0
-
-
-" ==============================================================================
-"  KEYMAPS
-" ==============================================================================
-
-" -- Window navigation ---------------------------------------------------------
-noremap <leader>d <C-w>l
+" -- Keys ------------------------------------------------------------------------
+noremap <leader>w <C-w>k
 noremap <leader>a <C-w>h
 noremap <leader>s <C-w>j
-noremap <leader>w <C-w>k
-
-" -- Window resize -------------------------------------------------------------
-noremap <leader>= <C-w>=
-noremap <leader>+ <C-w>5+
-noremap <leader>- <C-w>5-
-noremap <leader>> <C-w>5>
-noremap <leader>< <C-w>5<
-
-" -- Buffer navigation ---------------------------------------------------------
-nnoremap ]b :bnext<CR>
-nnoremap [b :bprev<CR>
-nnoremap <leader>bd :bdelete<CR>
-nnoremap <leader>ba :bufdo bd<CR>
-
-" -- Quickfix / error list -----------------------------------------------------
-nnoremap ]q :cnext<CR>
-nnoremap [q :cprev<CR>
-nnoremap <leader>qo :copen<CR>
-nnoremap <leader>qc :cclose<CR>
-
-" -- Indentation (keep visual selection after indent) --------------------------
-noremap > >>
-noremap < <<
+noremap <leader>d <C-w>l
+nnoremap <leader>x :w<CR>
+nnoremap <leader>/ :nohlsearch<CR>
+nmap - <Plug>(dirvish_up)
+nmap <leader>e <Plug>(dirvish_up)
+let g:dirvish_mode = ':sort ,^.*[\/],'                 " directories first, like oil
 vnoremap > >gv
 vnoremap < <gv
-
-" -- Clear search highlight ----------------------------------------------------
-nnoremap <leader>/ :nohlsearch<CR>
-
-" -- Close ---------------------------------------------------------------------
-noremap  <leader>es :q<CR>
-nnoremap <leader>eq :bd<CR>
-
-" -- Save ----------------------------------------------------------------------
-nnoremap <leader>x :w<CR>
-
-
-" ==============================================================================
-"  TERMINAL  (vim 8.1+ native :terminal)
-" ==============================================================================
-"
-"  <leader>tt  - toggle a terminal in a split at the bottom: opens it, and if
-"                already open, hides it (the shell/process keeps running -
-"                pressing <leader>tt again brings back the same session)
-"  Esc         - exit terminal insert mode back to normal mode (then :close
-"                or <leader>tt to hide/kill it)
-"  <leader>w/d/a - navigate out of the terminal pane like any other window
-
-function! s:ToggleTerm() abort
-    if exists('t:term_bufnr') && bufexists(t:term_bufnr)
-        let winid = bufwinid(t:term_bufnr)
-        if winid != -1
-            call win_gotoid(winid)
-            close
-        else
-            execute 'below sbuffer ' . t:term_bufnr
-            resize 16
-            setlocal winfixheight
-            startinsert
-        endif
-    else
-        below terminal
-        let t:term_bufnr = bufnr('%')
-        resize 16
-        setlocal winfixheight
-    endif
-endfunction
-
-nnoremap <silent> <leader>tt :call <SID>ToggleTerm()<CR>
-tnoremap <silent> <leader>tt <C-w>:call <SID>ToggleTerm()<CR>
-
-tnoremap <Esc>      <C-w>N
-tnoremap <leader>w  <C-w>k
-tnoremap <leader>d  <C-w>l
-tnoremap <leader>a  <C-w>h
-
-
-" ==============================================================================
-"  FILE EXPLORER  (dirvish - the only browser; netrw is disabled)
-" ==============================================================================
-"
-"  Feels like netrw, none of the jank: a listing is just a normal buffer of
-"  real paths, opened full-size in the current window.
-"
-"    -          from any file: open its directory in this window
-"               from a dirvish listing: go up one directory
-"    <CR>       open file / descend into dir (in this window)
-"    o / a      open in horizontal / vertical split
-"    p          preview file under cursor (<C-n>/<C-p> preview next/prev)
-"    q          quit browsing, back to the file you came from
-"    x          add file to arglist; :Shdo runs a shell cmd over the arglist
-"    ~ / cd     jump to home / :lcd to the browsed dir
-"    K          file info,  R  refresh,  g?  full help
-"    Lines are real paths: y$ yanks the path, /pattern searches names,
-"    and :g!/interface/d style filtering works (R restores the listing).
-"
-"  <leader>e   open the :Scope listing (or cwd listing when no scope is set)
-
-" Directories first, then files (netrw-style), both alphabetical
-let g:dirvish_mode = ':sort ,^.*[\/],'
-
-" Dirvish replaces netrw entirely - stop netrw loading at all
-let g:loaded_netrwPlugin = 1
-
-nnoremap <leader>e :call <SID>ScopeExplore()<CR>
-
-" Tone down the globals in listings (keep cursorline - it marks the selection)
-autocmd FileType dirvish setlocal nonumber norelativenumber colorcolumn=
-
-
-" ==============================================================================
-"  SCOPED WORKSPACE  (:Scope - work on a chosen subset of a huge tree)
-" ==============================================================================
-"
-"  CMSSW is enormous but you only ever touch a few packages at a time.
-"  Declare the ones you're working on and the explorer + fuzzy finders
-"  narrow to just those - no config files, no session state, just a command:
-"
-"    :Scope L1Trigger/L1THGCal DataFormats/L1THGCal
-"                     set the working set; args tab-complete against both
-"                     the cwd and $CMSSW_BASE/src, so plain package names work
-"    :Scope           show the current working set
-"    :ScopeClear      back to seeing everything
-"
-"  While a scope is set:
-"    <leader>e    dirvish listing of just the scope dirs - your table of
-"                 contents: <CR> descends into one, <leader>e comes back
-"                 (plain cwd listing when no scope is set)
-"    -            inside a scoped dir, going up stops AT the scope: from the
-"                 top of a scope dir, - returns to the scope listing instead
-"                 of the real (huge) parent directory
-"    <leader>ff   fuzzy-find files across the scope dirs only
-"    <leader>fr   live grep across the scope dirs only
-
-let g:scope_dirs = get(g:, 'scope_dirs', [])
-
-function! s:ResolveScopeDir(arg) abort
-    if isdirectory(expand(a:arg))
-        return expand(a:arg)
-    endif
-    if !empty($CMSSW_BASE) && isdirectory($CMSSW_BASE . '/src/' . a:arg)
-        return $CMSSW_BASE . '/src/' . a:arg
-    endif
-    return ''
-endfunction
-
-function! s:SetScope(args) abort
-    if empty(a:args)
-        echo empty(g:scope_dirs) ? 'No scope set  (:Scope dir1 dir2 ...)'
-                                \ : 'Scope: ' . join(g:scope_dirs, '  ')
-        return
-    endif
-    let dirs = []
-    for arg in a:args
-        let dir = s:ResolveScopeDir(arg)
-        if empty(dir)
-            echohl WarningMsg
-            echomsg 'Not a directory (checked cwd and $CMSSW_BASE/src): ' . arg
-            echohl None
-        else
-            call add(dirs, substitute(dir, '/$', '', ''))
-        endif
-    endfor
-    if empty(dirs) | return | endif      " nothing resolved - keep the old scope
-    let g:scope_dirs = dirs
-    echo 'Scope: ' . join(g:scope_dirs, '  ')
-endfunction
-
-function! s:ScopeComplete(lead, line, pos) abort
-    let out = glob(a:lead . '*/', 1, 1)
-    if !empty($CMSSW_BASE)
-        let src = $CMSSW_BASE . '/src/'
-        let out += map(glob(src . a:lead . '*/', 1, 1), 'strpart(v:val, len(src))')
-    endif
-    return map(out, "substitute(v:val, '/$', '', '')")
-endfunction
-
-command! -nargs=* -complete=customlist,s:ScopeComplete Scope call s:SetScope([<f-args>])
-command! ScopeClear let g:scope_dirs = [] | echo 'Scope cleared'
-
-" -- Explorer integration --------------------------------------------------------
-" A dirvish listing of the scope dirs. This is dirvish's documented "any
-" buffer of paths + setf dirvish" pattern (see its README) - every dirvish
-" mapping works on it: <CR> descends, o/a split, p previews.
-function! s:ScopeExplore() abort
-    if empty(g:scope_dirs)
-        Dirvish
-        return
-    endif
-    " One reusable scratch buffer. NB: bufhidden must stay 'hide' - dirvish
-    " refuses to navigate away from a buffer it would delete.
-    let buf = bufnr('^scope://$')
-    if buf == -1
-        enew
-        silent file scope://
-        setlocal buftype=nofile bufhidden=hide noswapfile nobuflisted
-    else
-        execute 'silent buffer' buf
-        setlocal modifiable
-        silent %delete _
-    endif
-    call setline(1, map(copy(g:scope_dirs), 'v:val . "/"'))
-    setfiletype dirvish
-endfunction
-
-" Scope-aware 'go up': the scope listing acts as the virtual parent of each
-" scope dir, so - never dumps you into the huge real parent by accident.
-function! s:IsScopeRoot(path) abort
-    let p = substitute(fnamemodify(a:path, ':p'), '/\+$', '', '')
-    for dir in g:scope_dirs
-        if substitute(fnamemodify(dir, ':p'), '/\+$', '', '') ==# p
-            return 1
-        endif
-    endfor
-    return 0
-endfunction
-
-function! s:DirvishUp() abort
-    if @% ==# 'scope://'
-        echo 'Top of scope  (:Scope to list it, :ScopeClear to browse freely)'
-        return
-    endif
-    if !empty(g:scope_dirs) && s:IsScopeRoot(@%)
-        call s:ScopeExplore()
-    else
-        " what <Plug>(dirvish_up) does: dirvish buffer names end in /, so
-        " :h:h of the absolute path is the parent directory
-        execute 'Dirvish' fnameescape(fnamemodify(@%, ':p:h:h'))
-    endif
-endfunction
-
-autocmd FileType dirvish nnoremap <buffer><silent> - :call <SID>DirvishUp()<CR>
-
-" -- fzf integration ---------------------------------------------------------------
-function! s:ScopedFiles() abort
-    if empty(g:scope_dirs)
-        Files
-        return
-    endif
-    let dirs = join(map(copy(g:scope_dirs), 'shellescape(v:val)'))
-    let src  = executable('rg') ? 'rg --files ' . dirs
-             \ : 'find ' . dirs . ' -type f -not -path ''*/.git/*'''
-    call fzf#run(fzf#wrap('scope-files', {'source': src, 'sink': 'e'}))
-endfunction
-
-function! s:ScopedRg(query) abort
-    let dirs = join(map(copy(g:scope_dirs), 'shellescape(v:val)'))
-    call fzf#vim#grep('rg --column --line-number --no-heading --color=always --smart-case '
-                \ . shellescape(a:query) . ' ' . dirs, 1, 0)
-endfunction
-
-command! ScopedFiles call s:ScopedFiles()
-command! -nargs=* ScopedRg call s:ScopedRg(<q-args>)
-
-
-" ==============================================================================
-"  FZF
-" ==============================================================================
-
-" Floating popup centred in the screen
-let g:fzf_layout = { 'down': '40%' }
-
-
-
-" -- Mappings ------------------------------------------------------------------
-" ff=files, fg=git files, fr=ripgrep, fb=buffers, fh=history, fl=lines, fm=marks
-" ff and fr respect :Scope when one is set (identical to :Files/:Rg otherwise)
-nnoremap <leader>ff :ScopedFiles<CR>
-nnoremap <leader>fg :GFiles<CR>
-nnoremap <leader>fr :ScopedRg<CR>
+nnoremap <leader>ff :CmsFiles<CR>
+nnoremap <leader>fg :CmsGrep<Space>
+nnoremap <leader>*  :CmsGrep <C-r><C-w><CR>
 nnoremap <leader>fb :Buffers<CR>
 nnoremap <leader>fh :History<CR>
-nnoremap <leader>fl :BLines<CR>
-nnoremap <leader>fm :Marks<CR>
+let g:fzf_layout = { 'down': '40%' }
 
-" -- CMSSW-scoped commands -----------------------------------------------------
-" <leader>fc - fuzzy find files under $CMSSW_BASE/src
-command! CmsFiles call fzf#vim#files($CMSSW_BASE . '/src', <bang>0)
-nnoremap <leader>fc :CmsFiles<CR>
-
-" <leader>fC - ripgrep scoped to $CMSSW_BASE/src (.cc .h .py only)
-command! -nargs=* CmsRg call fzf#vim#grep('rg --column --line-number --no-heading --color=always --smart-case --glob "*.cc" --glob "*.h" --glob "*.py" ' . shellescape(<q-args>) . ' ' . $CMSSW_BASE . '/src', 1, <bang>0)
-nnoremap <leader>fC :CmsRg<CR>
-
-
-" ==============================================================================
-"  GIT  - fugitive + gitgutter
-" ==============================================================================
-"
-"  Fugitive quick reference (inside :Git status press g? for full help):
-"    s        stage file or hunk under cursor
-"    u        unstage
-"    =        toggle inline diff for file
-"    dd       open diff split
-"    cc       open commit message buffer
-"    X        discard change
-"    q        close status window
-"
-"  Merge conflict 3-way diff (<leader>gm):
-"    <leader>gh   take the LEFT  side (ours)
-"    <leader>gl   take the RIGHT side (theirs)
-"    ]c / [c      jump to next / prev conflict marker
-
-" -- Fugitive mappings ---------------------------------------------------------
 nnoremap <leader>gs :Git<CR>
-nnoremap <leader>gd :Gdiffsplit<CR>
 nnoremap <leader>gb :Git blame<CR>
+nnoremap <leader>gd :Gdiffsplit<CR>
 nnoremap <leader>gl :0Gclog<CR>
-nnoremap <leader>gL :Git log --oneline --graph --all<CR>
-nnoremap <leader>lg :below terminal lazygit<CR>
-nnoremap <leader>gp :Git push<CR>
-nnoremap <leader>gP :Git pull<CR>
-nnoremap <leader>gc :Git commit<CR>
-nnoremap <leader>gw :Gwrite<CR>
 
-" -- Merge conflict resolution -------------------------------------------------
-nnoremap <leader>gm :Gdiffsplit!<CR>
-nnoremap <leader>gh :diffget //2<CR>
-nnoremap <leader>gr :diffget //3<CR>
-
-" -- GitGutter -----------------------------------------------------------------
-let g:gitgutter_sign_added              = '+'
-let g:gitgutter_sign_modified           = '~'
-let g:gitgutter_sign_removed            = '-'
-let g:gitgutter_sign_removed_first_line = '-'
-let g:gitgutter_sign_modified_removed   = '~'
-
-" Navigate hunks
-nnoremap ]h :GitGutterNextHunk<CR>
-nnoremap [h :GitGutterPrevHunk<CR>
-
-" Stage / undo / preview individual hunks without opening :Git status
-nnoremap <leader>hs :GitGutterStageHunk<CR>
-nnoremap <leader>hu :GitGutterUndoHunk<CR>
-nnoremap <leader>hp :GitGutterPreviewHunk<CR>
-
-" Toggle gutter
-nnoremap <leader>hg :GitGutterToggle<CR>
-
-
-" ==============================================================================
-"  VIM-LSP  (completion + LSP - works on vim 8+, no version requirement)
-" ==============================================================================
-"
-"  First-time setup:
-"    1. Open any .cc or .py file and run :LspInstallServer
-"       vim-lsp-settings will auto-detect and install clangd / pylsp
-"    2. For C++, generate compile_commands.json so clangd knows your flags:
-"         scram build -j4 compile_commands.json
-"
-"  Tab to cycle completion, S-Tab to go back, CR to confirm
-
-imap <expr> <Tab>   pumvisible() ? "\<C-n>" : "\<Tab>"
-imap <expr> <S-Tab> pumvisible() ? "\<C-p>" : "\<S-Tab>"
-imap <expr> <CR>    pumvisible() ? asyncomplete#close_popup() : "\<CR>"
-
-" Trigger manually with Ctrl+Space instead of auto-popup
-imap <C-Space> <Plug>(asyncomplete_force_refresh)
-
-" Show completion menu automatically
-let g:asyncomplete_auto_popup = 0     " only trigger manually, stops popup on space
-let g:asyncomplete_popup_delay = 0
-
-" Quieter completion (no preview window)
-set completeopt=menuone,noinsert,noselect
-
-" -- Navigation ----------------------------------------------------------------
-nmap <silent> gd :LspDefinition<CR>
-nmap <silent> gr :LspReferences<CR>
-nmap <silent> gi :LspImplementation<CR>
-nmap <silent> gt :LspTypeDefinition<CR>
-
-" -- Hover docs ----------------------------------------------------------------
-nnoremap <silent> K :LspHover<CR>
-
-" -- Rename symbol across files ------------------------------------------------
-nnoremap <leader>rn :LspRename<CR>
-
-" -- Diagnostics ---------------------------------------------------------------
-nmap <silent> ]e :LspNextError<CR>
-nmap <silent> [e :LspPreviousError<CR>
-nnoremap <leader>ce :LspDocumentDiagnostics<CR>
-
-" -- Code actions --------------------------------------------------------------
-nnoremap <leader>ca :LspCodeAction<CR>
-
-" -- LSP signs in gutter -------------------------------------------------------
-let g:lsp_diagnostics_signs_error         = {'text': 'E'}
-let g:lsp_diagnostics_signs_warning       = {'text': 'W'}
-let g:lsp_diagnostics_signs_hint          = {'text': '*'}
-let g:lsp_diagnostics_signs_information   = {'text': '*'}
-let g:lsp_diagnostics_virtual_text_enabled = 0   " keep it clean, use ]e/[e
-let g:lsp_document_highlight_enabled      = 0    " illuminate handles this
-
-
-" ==============================================================================
-"  CMSSW PATH INTEGRATION
-" ==============================================================================
-
-function! s:AddCMSSWPaths()
-    let cmssw = $CMSSW_BASE
-    if empty(cmssw) | return | endif
-    execute 'set path+=' . cmssw . '/src/**'
-    execute 'set path+=' . cmssw . '/lib/**'
-    " Release area too, so gf works on headers of packages you haven't checked
-    " out. Plain /src, no ** - includes are already Package/Sub/... relative to
-    " src, and recursing into a full release on cvmfs would take forever.
-    for base in [$CMSSW_FULL_RELEASE_BASE, $CMSSW_RELEASE_BASE]
-        if !empty(base) | execute 'set path+=' . base . '/src' | endif
-    endfor
-endfunction
-call s:AddCMSSWPaths()
-
-command! CMSSWRefresh call s:AddCMSSWPaths() | echo "CMSSW paths refreshed"
-
-" gf resolves headers; <leader>cf opens CMSSW-relative path under cursor
-nnoremap <leader>cf :call OpenCMSSWPath()<CR>
-nnoremap <leader>cv :call OpenCMSSWPathSplit()<CR>
-
-function! OpenCMSSWPath()
-    let token = expand('<cfile>')
-    if filereadable(token) || isdirectory(token)
-        execute 'edit ' . fnameescape(token) | return
-    endif
-    " Direct hit in the local area first, then the release area
-    for base in [$CMSSW_BASE, $CMSSW_FULL_RELEASE_BASE, $CMSSW_RELEASE_BASE]
-        if empty(base) | continue | endif
-        let full = base . '/src/' . token
-        if filereadable(full) || isdirectory(full)
-            execute 'edit ' . fnameescape(full) | return
-        endif
-    endfor
-    " Basename search as a fallback - local checkout only (a ** crawl of the
-    " full release on cvmfs would hang)
-    if !empty($CMSSW_BASE)
-        let hits = globpath($CMSSW_BASE . '/src', '**/' . fnamemodify(token, ':t'), 0, 1)
-        if !empty(hits)
-            if len(hits) == 1
-                execute 'edit ' . fnameescape(hits[0])
-            else
-                call setqflist(map(copy(hits), '{"filename": v:val, "lnum": 1}'))
-                copen
-            endif
-            return
-        endif
-    endif
-    echo "Not found: " . token
+" -- File operations in dirvish ----------------------------------------------------
+" %  new file, or a directory if the name ends in /    (a/b/c.txt makes a/ and b/ too)
+" r  rename or move (to an existing directory: moves into it)
+" D  delete, asks first; {Visual}D deletes every selected line; directories recursively
+function! s:DirvishNew() abort
+  let dir = expand('%:p')
+  let name = input('New (end with / for a directory): ', dir, 'file')
+  if empty(name) || name ==# dir | return | endif
+  if filereadable(name) || isdirectory(name) | echo "\nAlready exists: " . name | return | endif
+  call mkdir(name =~# '/$' ? name : fnamemodify(name, ':h'), 'p')
+  if name !~# '/$' | call writefile([], name) | endif
+  Dirvish %
+  call search('\V\^' . escape(fnamemodify(name, ':p'), '\') . '\$')
 endfunction
 
-function! OpenCMSSWPathSplit()
-    let token = expand('<cfile>')
-    let cmssw = $CMSSW_BASE
-    if filereadable(token)
-        let full = token
-    elseif !empty(cmssw) && filereadable(cmssw . '/src/' . token)
-        let full = cmssw . '/src/' . token
-    else
-        let full = ''
-    endif
-    if empty(full) | echo "Not found: " . token | return | endif
-    execute 'vsplit ' . fnameescape(full)
+function! s:DirvishRename() abort
+  let old = substitute(getline('.'), '/$', '', '')
+  let new = input('Rename to: ', old, 'file')
+  if empty(new) || new ==# old | return | endif
+  if isdirectory(new) | let new = substitute(new, '/$', '', '') . '/' . fnamemodify(old, ':t') | endif
+  if filereadable(new) || isdirectory(new) | echo "\nAlready exists: " . new | return | endif
+  call mkdir(fnamemodify(new, ':h'), 'p')
+  if rename(old, new) | echo "\nRename failed: " . old | return | endif
+  Dirvish %
+  call search('\V\^' . escape(fnamemodify(new, ':p'), '\') . '\$')
 endfunction
 
-" -- CMSSW path completion (insert mode: <C-x><C-u>) -----------------------------
-"  Completes CMSSW paths in any file, against $CMSSW_BASE/src AND the full
-"  release area - so it works for packages you haven't checked out, with no
-"  LSP or compile_commands.json needed. Plain vimscript glob, always works.
-"
-"    C++ (and everything else): slash paths, e.g. inside #include "..."
-"        DataFormats/L1THGC<C-x><C-u>  ->  DataFormats/L1THGCalDigi/
-"    Python: dotted module paths (process.load / import style), aware that
-"        Package.Sub.module maps to Package/Sub/python/module.py, and also
-"        completes generated *_cfi modules from cfipython/
-"
-"  Directories complete with a trailing / or . - press <C-x><C-u> again to
-"  descend a level. Tab/S-Tab cycles the menu, CR confirms (as everywhere).
-
-function! CmsswPathComplete(findstart, base) abort
-    if a:findstart
-        let line  = getline('.')
-        let start = col('.') - 1
-        while start > 0 && line[start - 1] =~# '[A-Za-z0-9_./-]'
-            let start -= 1
-        endwhile
-        return start
+function! s:DirvishDelete() range abort
+  let paths = getline(a:firstline, a:lastline)
+  let what = len(paths) == 1 ? fnamemodify(paths[0], ':~:.') : len(paths) . ' items'
+  if confirm('Delete ' . what . '?', "&Yes\n&No", 2) != 1 | return | endif
+  for p in paths
+    if delete(substitute(p, '/$', '', ''), p =~# '/$' ? 'rf' : '')
+      echohl ErrorMsg | echomsg 'Could not delete ' . p | echohl None
     endif
-
-    " Python completes dotted module paths unless a / says it's a real file path
-    let dotted = &filetype ==# 'python' && a:base !~# '/'
-    let token  = dotted ? substitute(a:base, '\.', '/', 'g') : a:base
-
-    " [root, style] pairs. 'src' inserts the implicit python/ dir in dotted
-    " mode; 'cfi' is the flat cfipython/<arch>/Pkg/Sub/x_cfi.py layout.
-    let roots = []
-    for base in [$CMSSW_BASE, $CMSSW_FULL_RELEASE_BASE, $CMSSW_RELEASE_BASE]
-        if empty(base) | continue | endif
-        call add(roots, [base . '/src', 'src'])
-        if dotted && !empty($SCRAM_ARCH)
-            call add(roots, [base . '/cfipython/' . $SCRAM_ARCH, 'cfi'])
-        endif
-    endfor
-
-    let out  = []
-    let seen = {}
-    for [root, style] in roots
-        if !isdirectory(root) | continue | endif
-        let pat = token
-        if dotted && style ==# 'src'
-            let comps = split(token, '/', 1)
-            if len(comps) >= 3
-                let pat = comps[0] . '/' . comps[1] . '/python/' . join(comps[2:], '/')
-            endif
-        endif
-        " nosuf=1: don't let wildignore silently hide results
-        for hit in glob(root . '/' . pat . '*', 1, 1)
-            let rel   = strpart(hit, len(root) + 1)
-            let isdir = isdirectory(hit)
-            if dotted
-                if !isdir && rel !~# '\.py$' | continue | endif
-                let rel  = substitute(rel, '/python/', '/', '')
-                let rel  = substitute(rel, '\.py$', '', '')
-                let word = substitute(rel, '/', '.', 'g') . (isdir ? '.' : '')
-            else
-                let word = rel . (isdir ? '/' : '')
-            endif
-            if has_key(seen, word) | continue | endif
-            let seen[word] = 1
-            call add(out, {'word': word, 'menu': isdir ? '/' : ''})
-        endfor
-    endfor
-    return sort(out, {a, b -> a.word ==# b.word ? 0 : a.word ># b.word ? 1 : -1})
+  endfor
+  Dirvish %
 endfunction
 
-set completefunc=CmsswPathComplete
-
-
-" ==============================================================================
-"  STATUSLINE  (built-in, no plugin)
-" ==============================================================================
-
-set laststatus=2
-set statusline=\ %<%f\ %h%m%r                                    " filename, flags
-set statusline+=%{exists('*FugitiveHead')\ &&\ FugitiveHead()!=''\ ?\ '\ \ ('.FugitiveHead().')'\ :\ ''}
-set statusline+=%=                                               " right-align from here
-set statusline+=%y\ %l:%c\ %p%%\                                 " filetype, line:col, %
-
-
-" ==============================================================================
-"  ILLUMINATE
-" ==============================================================================
-
-let g:Illuminate_delay = 200
-hi IlluminatedWordText  cterm=underline gui=underline
-hi IlluminatedWordRead  cterm=underline gui=underline
-hi IlluminatedWordWrite cterm=underline gui=underline
-
-
-" ==============================================================================
-"  AUTOCOMMANDS
-" ==============================================================================
-
-augroup vimrc_misc
-    autocmd!
-    " Strip trailing whitespace on save
-    autocmd BufWritePre *.cc,*.h,*.cpp,*.py,*.vim,*.cfg :%s/\s\+$//e
-    " Return to last cursor position when reopening a file
-    autocmd BufReadPost * if line("'\"") > 1 && line("'\"") <= line("$") | exe "normal! g`\"" | endif
-    " Refresh CMSSW paths if CMSSW_BASE changes (e.g. after cmsenv in terminal pane)
-    autocmd ShellCmdPost * call s:AddCMSSWPaths()
+augroup vimrc_dirvish
+  autocmd!
+  autocmd FileType dirvish nnoremap <buffer><silent> % :call <SID>DirvishNew()<CR>
+  autocmd FileType dirvish nnoremap <buffer><silent> r :call <SID>DirvishRename()<CR>
+  autocmd FileType dirvish nnoremap <buffer><silent> D :call <SID>DirvishDelete()<CR>
+  autocmd FileType dirvish xnoremap <buffer><silent> D :call <SID>DirvishDelete()<CR>
 augroup END
 
-autocmd filetype cpp nnoremap <F5> :w <bar> !./run.sh<CR>
-autocmd filetype cpp nnoremap <F7> :w <bar> !./run.sh copy<CR>
-autocmd filetype cpp nnoremap <F6> :w <bar> !./run.sh reset<CR>
+" -- Reviewing changes: :Review <rev> ------------------------------------------------
+" Compares the working tree with <rev> (default HEAD, i.e. uncommitted changes;
+" :Review HEAD~2 for the last two commits) until :ReviewOff. Meanwhile:
+"   explorer (<leader>e)    changed files are tagged M/A/R (untracked ones as A), directories say how many
+"                           changed files they hold, deleted files are listed below
+"   opening a changed file  <rev> on the left, your file on the right; ]c [c jump
+"                           between changes, <leader>e goes back and closes the left side
+"   gitgutter signs and the quickfix list (:copen, every changed file) use <rev> too
+" :Changes <rev> is the same without the diff: files open normally, with their gutter
+" signs. The tags are a snapshot: run :Changes again to update them. :ChangesOff ends it.
+let s:review = {}   " {'rev': ..., 'diff': 0/1, 'files': {abs path: {'status': M/A/R/D, 'old': path at rev}}}
 
+function! s:Review(rev, diff) abort
+  let root = FugitiveWorkTree()
+  if empty(root) | echo 'Not in a git repository' | return | endif
+  let lines = systemlist('git -C ' . shellescape(root) . ' diff --name-status -M ' . shellescape(a:rev))
+  if v:shell_error | echoerr join(lines) | return | endif
+  " git diff never lists untracked files: count them as added
+  let untracked = systemlist('git -C ' . shellescape(root) . ' ls-files --others --exclude-standard')
+  if v:shell_error | echoerr join(untracked) | return | endif
+  call extend(lines, map(untracked, '"A\t" . v:val'))
+  let s:review = {'rev': a:rev, 'diff': a:diff, 'files': {}}
+  let qf = []
+  for line in lines
+    let f = split(line, "\t")     " M path | A path | D path | R095 old new
+    let file = {'status': f[0][0], 'old': f[1]}
+    let s:review.files[root . '/' . f[-1]] = file
+    call add(qf, {'filename': file.status ==# 'D' ? FugitiveFind(a:rev . ':' . f[1]) : root . '/' . f[-1],
+          \ 'text': file.status ==# 'R' ? 'R  from ' . f[1] : file.status})
+  endfor
+  call setqflist([], ' ', {'title': 'Review ' . a:rev, 'items': qf})
+  let g:gitgutter_diff_base = a:rev
+  GitGutterAll
+  if !a:diff | call s:ReviewCloseDiff() | endif
+  call s:ReviewRefresh()
+  echo len(qf) . ' files changed since ' . a:rev . '  (<leader>e to browse them, :copen to list them)'
+endfunction
 
+function! s:ReviewOff() abort
+  let s:review = {}
+  let g:gitgutter_diff_base = ''
+  GitGutterAll
+  call s:ReviewCloseDiff()
+  call s:ReviewRefresh()
+endfunction
+
+function! s:ReviewRefresh() abort
+  if &filetype ==# 'dirvish' | call s:ReviewExplorer() | else | call s:ReviewDiff(bufnr()) | endif
+endfunction
+
+" Close the <rev> side of this tab's review diff
+function! s:ReviewCloseDiff() abort
+  let closed = 0
+  for w in reverse(range(1, winnr('$')))
+    if !empty(getwinvar(w, 'review_base')) | execute w . 'close' | let closed = 1 | endif
+  endfor
+  if closed
+    diffoff!
+    for w in range(1, winnr('$')) | call setwinvar(w, '&cursorlineopt', 'both') | endfor
+  endif
+endfunction
+
+" Put <rev> of the file shown in this window on its left (timer after BufWinEnter)
+function! s:ReviewDiff(bufnr, ...) abort
+  if empty(s:review) || !s:review.diff || bufnr() != a:bufnr || &buftype !=# '' | return | endif
+  let path = expand('%:p')
+  if !empty(filter(range(1, winnr('$')), 'getwinvar(v:val, "review_base") ==# path')) | return | endif
+  call s:ReviewCloseDiff()
+  let file = get(s:review.files, path, {})
+  if empty(file) || file.status ==# 'A' | return | endif
+  let win = win_getid()
+  execute 'leftabove Gvdiffsplit' fnameescape(s:review.rev . ':' . file.old)
+  for w in range(1, winnr('$'))
+    if !getwinvar(w, '&diff') | continue | endif
+    " cursorline would repaint the (cursor-bound) current line in both panes; keep it to the number
+    call setwinvar(w, '&cursorlineopt', 'number')
+    if win_getid(w) != win
+      call setwinvar(w, 'review_base', path)
+      " gitgutter would compare <rev> with its own parent there: signs unrelated to this review
+      call win_execute(win_getid(w), 'GitGutterBufferDisable')
+    endif
+  endfor
+  call win_gotoid(win)
+endfunction
+
+" Tag changed files and directories in a dirvish listing, list deleted ones below it
+function! s:ReviewExplorer(...) abort
+  if &filetype !=# 'dirvish' | return | endif
+  call s:ReviewCloseDiff()
+  let types = ['M', 'R', 'A', 'D', 'dir']
+  for [t, hl] in [['M', 'GitGutterChange'], ['R', 'GitGutterChange'], ['A', 'GitGutterAdd'],
+        \ ['D', 'GitGutterDelete'], ['dir', 'Comment']]
+    if empty(prop_type_get('review_' . t)) | call prop_type_add('review_' . t, {'highlight': hl}) | endif
+  endfor
+  call prop_remove({'types': map(copy(types), '"review_" . v:val'), 'all': 1})
+  if empty(s:review) | return | endif
+  let paths = keys(s:review.files)
+  for lnum in range(1, line('$'))
+    let line = getline(lnum)
+    if line =~# '/$'
+      let n = len(filter(copy(paths), 'stridx(v:val, line) == 0'))
+      if n | call prop_add(lnum, 0, {'type': 'review_dir', 'text': n . ' changed', 'text_align': 'after', 'text_padding_left': 2}) | endif
+    elseif has_key(s:review.files, line)
+      let file = s:review.files[line]
+      call prop_add(lnum, 0, {'type': 'review_' . file.status, 'text_align': 'after', 'text_padding_left': 2,
+            \ 'text': file.status ==# 'R' ? 'R  from ' . file.old : file.status})
+    endif
+  endfor
+  " Deleted files (or whole deleted directories) that used to be in this directory
+  let dir = b:dirvish._dir
+  let gone = {}
+  for [path, file] in items(s:review.files)
+    if file.status ==# 'D' && stridx(path, dir) == 0
+      let gone[matchstr(path[len(dir):], '^[^/]*/\=')] = 1
+    endif
+  endfor
+  for name in sort(filter(keys(gone), '!filereadable(dir . v:val) && !isdirectory(dir . v:val)'))
+    call prop_add(line('$'), 0, {'type': 'review_D', 'text': 'D  ' . name, 'text_align': 'below'})
+  endfor
+endfunction
+
+command! -nargs=? Review call s:Review(empty(<q-args>) ? 'HEAD' : <q-args>, 1)
+command! ReviewOff call s:ReviewOff()
+command! -nargs=? Changes call s:Review(empty(<q-args>) ? 'HEAD' : <q-args>, 0)
+command! ChangesOff call s:ReviewOff()
+
+augroup vimrc_review
+  autocmd!
+  " Timers: dirvish forbids its FileType handlers to change windows, and splitting
+  " in the middle of opening a buffer confuses the other BufWinEnter handlers
+  autocmd FileType dirvish call timer_start(0, function('s:ReviewExplorer'))
+  autocmd BufWinEnter * if !empty(s:review)
+        \ | call timer_start(0, function('s:ReviewDiff', [str2nr(expand('<abuf>'))])) | endif
+augroup END
+
+" -- CMSSW + externals -----------------------------------------------------------
+" The dirs everything searches: the area's src/ plus the include dirs of these
+" scram externals. Read from the area's tool files (first line has path="...")
+" rather than `scram tool tag`, which prints nothing under an el9 cmsenv here.
+let g:cms_externals = ['alpaka', 'cluestering']
+
+function! s:CmsDirs() abort
+  if exists('s:cms_dirs') | return s:cms_dirs | endif
+  let s:cms_dirs = []
+  let scram = finddir('.SCRAM', getcwd() . ';')
+  let base = !empty($CMSSW_BASE) ? $CMSSW_BASE : empty(scram) ? '' : fnamemodify(scram, ':p:h:h')
+  if empty(base) | return s:cms_dirs | endif
+  call add(s:cms_dirs, base . '/src')
+  for tool in g:cms_externals
+    let xml = glob(base . '/config/toolbox/*/tools/selected/' . tool . '.xml', 1, 1)
+    let inc = empty(xml) ? '' : matchstr(readfile(xml[0], '', 1)[0], 'path="\zs[^"]*') . '/include'
+    if isdirectory(inc) | call add(s:cms_dirs, inc) | endif
+  endfor
+  " gf: #include paths are relative to src/ or to an external's include/.
+  " The release areas (set by cmsenv) cover packages you haven't checked out.
+  let releases = map(filter([$CMSSW_RELEASE_BASE, $CMSSW_FULL_RELEASE_BASE], '!empty(v:val)'), "v:val . '/src'")
+  let &path .= ',' . join(s:cms_dirs + releases, ',')
+  let &tags .= ',' . base . '/tags'
+  return s:cms_dirs
+endfunction
+
+" Search dirs as shell args, cwd-relative where possible so fzf lines stay short
+function! s:CmsArgs() abort
+  return join(map(copy(s:CmsDirs()), "shellescape(v:val ==# getcwd() ? '.' : fnamemodify(v:val, ':~:.'))"))
+endfunction
+
+function! s:MakeTags() abort
+  let dirs = s:CmsDirs()
+  if empty(dirs) | echo 'Not in a CMSSW area' | return | endif
+  let out = fnamemodify(dirs[0], ':h') . '/tags'
+  echo 'Indexing in the background: ' . join(dirs)
+  call job_start(['ctags', '-R', '-f', out, '--languages=C,C++,Python', '--langmap=c++:+.cu.cuh',
+        \ '--c++-kinds=+p', '--exclude=.git'] + dirs,
+        \ {'exit_cb': {job, status -> execute('echomsg "MakeTags ' . (status ? 'failed' : 'done') . ': ' . out . '"', '')}})
+endfunction
+
+command! MakeTags call s:MakeTags()
+command! CmsFiles call fzf#run(fzf#wrap({'source': 'rg --files ' . s:CmsArgs()}))
+command! -nargs=* CmsGrep call fzf#vim#grep('rg --column --line-number --no-heading --color=always --smart-case -- '
+      \ . shellescape(<q-args>) . ' ' . s:CmsArgs())
+
+augroup vimrc_cmssw
+  autocmd!
+  " Reopen files where you left off
+  autocmd BufReadPost * if line("'\"") > 1 && line("'\"") <= line("$") | exe 'normal! g`"' | endif
+  autocmd FileType c,cpp,cuda,python call s:CmsDirs()
+augroup END
+
+" -- clangd: only if it actually runs here ----------------------------------------
+let g:lsp_diagnostics_enabled = 0
+let g:lsp_document_highlight_enabled = 0
+set completeopt=menuone,noinsert,noselect
+" Tab/S-Tab cycle the pop-up (normal Tab otherwise); Enter accepts the selected item
+inoremap <expr> <Tab>   pumvisible() ? "\<C-n>" : "\<Tab>"
+inoremap <expr> <S-Tab> pumvisible() ? "\<C-p>" : "\<S-Tab>"
+inoremap <expr> <CR>    pumvisible() && complete_info().selected != -1 ? asyncomplete#close_popup() : "\<CR>"
+
+" Inlay hints: grey virtual text with the deduced type after every `auto` and the
+" parameter name before every call argument. <leader>th toggles them.
+let g:lsp_inlay_hints_enabled = 1
+function! s:ToggleInlayHints() abort
+  let g:lsp_inlay_hints_enabled = !g:lsp_inlay_hints_enabled
+  if !g:lsp_inlay_hints_enabled
+    call prop_remove({'type': 'vim_lsp_inlay_hint_type', 'all': 1})
+    call prop_remove({'type': 'vim_lsp_inlay_hint_parameter', 'all': 1})
+  endif
+endfunction
+
+function! s:LspBuffer() abort
+  nmap <buffer> gd <Plug>(lsp-definition)
+  nmap <buffer> gr <Plug>(lsp-references)
+  nmap <buffer> gy <Plug>(lsp-type-definition)
+  nmap <buffer> K  <Plug>(lsp-hover)
+  nnoremap <buffer><silent> <leader>th :call <SID>ToggleInlayHints()<CR>
+endfunction
+
+" One compile DB per CMSSW area, so headers from the release on /cvmfs and from
+" alpaka are parsed with this area's flags too (otherwise clangd finds the
+" release's own compile_commands.json and tries to index all of CMSSW into
+" read-only /cvmfs). -j: clangd's default is one worker per core, 256 here, at
+" up to ~1 GB per CMSSW file being indexed.
+function! s:ClangdCmd() abort
+  let cmd = ['clangd', '--background-index', '--background-index-priority=low', '-j=8',
+        \ '--query-driver=/cvmfs/**,/opt/rh/**']
+  let dirs = s:CmsDirs()
+  let scram = finddir('.SCRAM', expand('%:p:h') . ';')
+  let base = !empty(dirs) ? fnamemodify(dirs[0], ':h') : empty(scram) ? '' : fnamemodify(scram, ':p:h:h')
+  if filereadable(base . '/compile_commands.json')
+    call add(cmd, '--compile-commands-dir=' . base)
+  endif
+  return cmd
+endfunction
+
+if executable('clangd')
+  call system('clangd --version')
+  if !v:shell_error
+    augroup vimrc_lsp
+      autocmd!
+      autocmd User lsp_setup call lsp#register_server({'name': 'clangd',
+            \ 'cmd': {_ -> s:ClangdCmd()},
+            \ 'initialization_options': {'fallbackFlags': ['-std=c++20',
+            \   '--gcc-install-dir=/opt/rh/gcc-toolset-13/root/usr/lib/gcc/x86_64-redhat-linux/13']},
+            \ 'allowlist': ['c', 'cpp', 'cuda']})
+      " CMSSW's libstdc++: the compile DB passes --gcc-toolchain=<cvmfs gcc>, but pixi's
+      " clangd targets x86_64-conda-linux-gnu and only finds gcc under a matching
+      " triple; cvmfs gcc is x86_64-redhat-linux-gnu. ~/.config/clangd/config.yaml
+      " adds that --target for CMSSW files (without it: 'cstdint' file not found).
+      " fallbackFlags: only used when there's no compile_commands.json -> C++20 with
+      " gcc-toolset-13's headers instead of the system gcc 8 ones
+    augroup END
+  endif
+endif
+
+" CMake (CMakeLists.txt, *.cmake), Python and TS/JS get the same pop-up and gd/gr/K
+augroup vimrc_lsp_more
+  autocmd!
+  if executable('neocmakelsp')          " pixi global install neocmakelsp
+    autocmd User lsp_setup call lsp#register_server({'name': 'neocmakelsp',
+          \ 'cmd': {_ -> ['neocmakelsp', 'stdio']},
+          \ 'allowlist': ['cmake']})
+  endif
+  if executable('pyright-langserver')   " npm i -g pyright
+    autocmd User lsp_setup call lsp#register_server({'name': 'pyright',
+          \ 'cmd': {_ -> ['pyright-langserver', '--stdio']},
+          \ 'workspace_config': {'python': {'analysis': {'autoSearchPaths': v:true}}},
+          \ 'allowlist': ['python']})
+  endif
+  " npm i -g typescript-language-server@5.3.0 typescript@6.0.3 (6.x of the server needs node >= 22.22;
+  " typescript 7 has no tsserver). Root: nearest tsconfig/package.json, so the server uses that
+  " project's node_modules/typescript; the global one only for loose files.
+  if executable('typescript-language-server')
+    autocmd User lsp_setup call lsp#register_server({'name': 'typescript-language-server',
+          \ 'cmd': {_ -> ['typescript-language-server', '--stdio']},
+          \ 'root_uri': {_ -> lsp#utils#path_to_uri(lsp#utils#find_nearest_parent_file_directory(
+          \   lsp#utils#get_buffer_path(), ['tsconfig.json', 'jsconfig.json', 'package.json', '.git/']))},
+          \ 'allowlist': ['typescript', 'typescriptreact', 'javascript', 'javascriptreact']})
+  endif
+  if executable('metals')               " Scala: source /data/mmarriot/scala/env.sh first
+    " Root: nearest dir with a build file, so vim can be started from anywhere above it.
+    " Metals builds through .bsp/ (see env.sh); the first open indexes for a minute.
+    " Doctor as json: otherwise Metals asks to start its HTTP server on every connect
+    autocmd User lsp_setup call lsp#register_server({'name': 'metals',
+          \ 'cmd': {_ -> ['metals']},
+          \ 'root_uri': {_ -> lsp#utils#path_to_uri(lsp#utils#find_nearest_parent_file_directory(
+          \   lsp#utils#get_buffer_path(), ['build.scala', 'project.scala', 'build.sbt', '.git/']))},
+          \ 'initialization_options': {'doctorProvider': 'json', 'executeClientCommandProvider': v:true},
+          \ 'allowlist': ['scala', 'sbt']})
+  endif
+  autocmd User lsp_buffer_enabled call s:LspBuffer()
+augroup END
+
+" -- Ask Claude (vim-ask) ----------------------------------------------------------
+" Saved prompts: <leader>p picks one, :Ask -name runs one, <leader>I with "-name ..." uses
+" one's model and effort for a typed question. A prompt without 'model' or 'effort' uses
+" g:ask_model / g:ask_effort (which :AskModel / :AskEffort change). These are the
+" plugin's defaults written out; add your own alongside. :help ask-prompts
+let g:ask_prompts = {
+      \ 'explain': {'prompt': 'Briefly explain what this code does: the types involved, what each part '
+      \                     . 'returns, and any syntax that is not obvious.'},
+      \ 'deep':    {'prompt': 'Explain this code in depth: what it does and why, the types and what each '
+      \                     . 'call returns, the language features it relies on, and anything subtle or '
+      \                     . 'easy to get wrong. Take as many lines as it needs.',
+      \             'effort': 'high'},
+      "\ Machine code (vim-cmssw): every prompt named asm* gets the pane's instructions for the
+      "\ selection, their lines, inline chains and inlined source. <leader>ce asks 'asm',
+      "\ <leader>cE picks one of these. 'system_prompt' replaces vim-ask's (which keeps answers
+      "\ to ~15 lines); without one, vim-ask's is used.
+      \ 'asm':       {'model': 'claude-opus-5-5', 'effort': 'high',
+      \               'system_prompt': 'You explain how C++ compiles to machine code, to a physicist who '
+      \                 . 'develops and reviews CMSSW (CMS) reconstruction code and is learning how source maps '
+      \                 . 'onto the hardware. You are given the C++, the instructions the compiler produced for it '
+      \                 . 'with the source line and inline chain of each, and the source text of every inlined '
+      \                 . 'frame. Base every claim on that listing and cite instructions by address (`01a0`); '
+      \                 . 'where it does not show something, say so instead of guessing. The answer is read in a '
+      \                 . 'popup in Vim: no preamble, short paragraphs or bullets, light Markdown, as long as needed.',
+      \               'prompt': 'Explain how this C++ becomes the machine code listed. Walk through the instructions '
+      \                 . 'in order, grouping them by the C++ expression and inlined frame they implement. For each '
+      \                 . 'group say what the hardware does (loads and stores and their kind, address arithmetic, '
+      \                 . 'predicates and branches, vector width, registers) and what it scales with (per element, '
+      \                 . 'per thread, per call). Point out anything surprising or costly (bounds checks, error or '
+      \                 . 'trap paths, spills, redundant work, missed vectorisation, calls that were not inlined) '
+      \                 . 'and what in the source causes it. Keep the mechanism, which the listing shows, apart from '
+      \                 . 'the magnitude, which only a measurement can show, and say how to measure it.'},
+      \ 'asm-brief': {'model': 'claude-opus-5-5', 'effort': 'medium',
+      \               'prompt': 'From the machine code listed: what does this C++ compile to, in a few bullets citing '
+      \                 . 'instruction addresses, and the one or two things about it that matter for performance. '
+      \                 . 'Only claim what the listing shows.'},
+      "\ <leader>R: the file's uncommitted diff goes with it (s:AskReviewDiff below)
+      \ 'review':    {'model': 'claude-opus-5-5', 'effort': 'medium',
+      \               'system_prompt': 'You review code for a programmer in Vim. You are given the file''s '
+      \                 . 'uncommitted changes as a git diff (if any) and the lines they selected. The answer is '
+      \                 . 'read in a popup: no preamble, bullets grouped by severity (bugs, then issues, then '
+      \                 . 'style), citing line numbers, light Markdown, as long as needed. If something cannot be '
+      \                 . 'known from the code shown, say so instead of guessing.',
+      \               'prompt': 'I am doing a code review. Please review this file''s additions (the diff) and the '
+      \                 . 'selected lines. How is the code? Is it clean? Point out potential bugs and any issues '
+      \                 . 'you see, and suggest changes or improvements.'},
+      \ }
+function! s:AskReviewDiff(sel) abort
+  if a:sel.prompt !=# 'review' || a:sel.file ==# ''
+    return {}
+  endif
+  let diff = systemlist('git -C ' . shellescape(fnamemodify(a:sel.file, ':h'))
+        \ . ' diff HEAD -- ' . shellescape(a:sel.file))
+  return v:shell_error || empty(diff) ? {} : {'name': 'diff', 'lines': ['Uncommitted changes:', '```diff'] + diff + ['```']}
+endfunction
+let g:ask_context_providers = get(g:, 'ask_context_providers', [])
+if index(g:ask_context_providers, function('s:AskReviewDiff')) < 0
+  call add(g:ask_context_providers, function('s:AskReviewDiff'))
+endif
+xnoremap <silent> <leader>R :Ask -review<CR>
+let g:ask_default = 'explain'                 " <leader>i
+let g:ask_model = 'claude-opus-5-5'
+let g:ask_effort = 'low'
+" <leader>I searches the git repo of the file; a CMSSW checkout is sparse, so also the release
+let g:ask_search_dirs = filter([$CMSSW_RELEASE_BASE . '/src', $CMSSW_FULL_RELEASE_BASE . '/src'], 'isdirectory(v:val)')
+" offered by :AskModel
+let g:ask_models = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1']
+
+" -- Path completion that resolves variables -------------------------------------
+" Type a path containing / (any file type) and that directory's entries pop up.
+" Before listing it substitutes ${VAR} {VAR} $VAR (last `set(VAR value` or
+" `VAR = value` above the cursor, else the environment), $ENV{VAR}, ~, and CMake's
+" CMAKE_CURRENT_SOURCE_DIR / CMAKE_CURRENT_LIST_DIR (this file's dir) and
+" CMAKE_SOURCE_DIR / PROJECT_SOURCE_DIR (topmost CMakeLists.txt above it).
+" Relative paths start from this file's directory. So after
+"   set(CMS_EXT /cvmfs/cms.cern.ch/el8_amd64_gcc13/external)
+" typing ${CMS_EXT}/alpaka/2. lists the real alpaka 2.x directories.
+function! s:PathVar(name, envonly) abort
+  if a:name =~# '^CMAKE_CURRENT_\%(SOURCE\|LIST\)_DIR$'
+    return expand('%:p:h')
+  elseif a:name =~# '^\%(CMAKE\|PROJECT\)_SOURCE_DIR$'
+    let l:dir = expand('%:p:h')
+    while l:dir !=# '/' && filereadable(fnamemodify(l:dir, ':h') . '/CMakeLists.txt')
+      let l:dir = fnamemodify(l:dir, ':h')
+    endwhile
+    return l:dir
+  endif
+  let l:val = v:null
+  if !a:envonly
+    let l:pat = '\%(\<[Ss][Ee][Tt]\s*(\s*' . a:name . '\s\+\|\<' . a:name
+          \ . '\s*:\==\s*\)["'']\=\zs[^"''[:space:])]\+'
+    for l:line in getline(1, line('.') - 1)
+      let l:m = matchstr(l:line, l:pat)
+      if !empty(l:m) | let l:val = l:m | endif
+    endfor
+  endif
+  return l:val is v:null ? getenv(a:name) : l:val   " v:null if unknown
+endfunction
+
+function! s:PathExpand(path) abort
+  let l:p = a:path
+  for _ in range(20)   " values can use other variables; the cap stops set(A ${A}/x)
+    let l:m = matchlist(l:p, '\$\(ENV\)\={\(\h\w*\)}\|\$\(\h\w*\)\|{\(\h\w*\)}')
+    if empty(l:m) | return l:p | endif
+    let l:val = s:PathVar(l:m[2] . l:m[3] . l:m[4], l:m[1] ==# 'ENV')
+    if l:val is v:null | return v:null | endif
+    let l:i = stridx(l:p, l:m[0])
+    let l:p = strpart(l:p, 0, l:i) . l:val . strpart(l:p, l:i + len(l:m[0]))
+  endfor
+  return v:null
+endfunction
+
+function! s:PathComplete(opt, ctx) abort
+  let l:tok = matchstr(a:ctx.typed, '[^[:space:]"''(),=;:]*$')
+  let l:base = matchstr(l:tok, '[^/]*$')
+  let l:dir = l:tok =~# '/' ? s:PathExpand(l:tok[: -len(l:base) - 1]) : v:null
+  let l:items = []
+  if l:dir isnot v:null
+    if l:dir =~# '^\~/' | let l:dir = $HOME . l:dir[1:] | endif
+    if l:dir !~# '^/' | let l:dir = expand('%:p:h') . '/' . l:dir | endif
+    for l:e in isdirectory(l:dir) ? readdirex(l:dir) : []
+      if l:e.name[0] ==# '.' && l:base[0] !=# '.' | continue | endif
+      let l:isdir = l:e.type =~# '^\%(dir\|linkd\|junction\)$'
+      call add(l:items, {'word': l:e.name . (l:isdir ? '/' : ''),
+            \ 'menu': l:isdir ? '[dir]' : '[file]'})
+    endfor
+  endif
+  call asyncomplete#complete(a:opt.name, a:ctx, a:ctx.col - len(l:base), l:items)
+endfunction
+
+" asyncomplete only re-asks on keyword chars, so also trigger on . - + (2.0.0-abc)
+" Replaces asyncomplete's filter (same fuzzy match) so that when real path entries
+" match, only those show; otherwise the LSP's hundreds of words bury them
+function! s:Preprocess(opts, matches) abort
+  let l:found = {}
+  for [l:name, l:src] in items(a:matches)
+    let l:base = a:opts.typed[l:src.startcol - 1 :]
+    let l:items = empty(l:base) ? l:src.items : matchfuzzy(l:src.items, l:base, {'key': 'word'})
+    if !empty(l:items) | let l:found[l:name] = [l:src.startcol, l:items] | endif
+  endfor
+  if has_key(l:found, 'path') | let l:found = {'path': l:found.path} | endif
+  let a:opts.startcol = min(map(values(l:found), 'v:val[0]'))
+  call asyncomplete#preprocess_complete(a:opts, flatten(map(values(l:found), 'v:val[1]')))
+endfunction
+let g:asyncomplete_preprocessor = [function('s:Preprocess')]
+
+augroup vimrc_path
+  autocmd!
+  autocmd User asyncomplete_setup call asyncomplete#register_source({'name': 'path',
+        \ 'allowlist': ['*'], 'priority': 10, 'triggers': {'*': ['/', '.', '-', '+']},
+        \ 'completor': function('s:PathComplete')})
+augroup END

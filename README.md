@@ -1,6 +1,6 @@
 # dotfiles
 
-neovim + vim + tmux + bash config, tuned for CMSSW / performance work on CPU & GPU code.
+vim + tmux + bash config, tuned for CMSSW / performance work on CPU & GPU code.
 
 ## Layout
 
@@ -10,45 +10,32 @@ neovim + vim + tmux + bash config, tuned for CMSSW / performance work on CPU & G
 | `tmux.conf`           | `~/.tmux.conf`     |
 | `bashrc`              | `~/.bashrc`        |
 | `gitconfig`           | `~/.gitconfig`     |
-| `config/nvim/`        | `~/.config/nvim/`  |
+| `vim/colors/`         | `~/.vim/colors/`   |
 | `config/tmux/`        | `~/.config/tmux/`  |
 | `config/git/`         | `~/.config/git/`   |
 
-Plugin managers (lazy.nvim, vim-plug, TPM) and the plugins/servers they fetch
-(`~/.local/share/nvim/lazy`, `~/.vim/plugged`, `~/.tmux/plugins`) are *not* stored
+Plugin managers (vim-plug, TPM) and the plugins they fetch
+(`~/.vim/plugged`, `~/.tmux/plugins`) are *not* stored
 here - they're bootstrapped by `install.sh` and managed by the tools themselves,
 same idea as not committing `node_modules`.
 
-## Neovim
+## Tools
 
-Neovim is the primary editor now (`config/nvim/`, lazy.nvim). It reuses the whole
-vimrc keymap vocabulary, plus native LSP, telescope, oil, gitsigns/diffview.
-
-- **Build**: neovim's official binaries need a newer glibc than this el8 box has,
-  so nvim is built from source (gcc-toolset-13) into `~/.local/bin/nvim`; the build
-  tree lives on `/data/mmarriot/tools/neovim` (off the 10 GB AFS quota). Update with
-  `cd ~/src/neovim && git pull && make CMAKE_INSTALL_PREFIX=$HOME/.local && make install`.
-- **C++ LSP**: clangd/clang-format/clang-tidy come from **`cmsenv`** (CVMFS, el8-built,
-  version-matched to the compiler). *Launch nvim from inside a cmsenv* and C++ LSP
-  attaches automatically; outside one it stays quiet. No Mason. Generate flags with
-  `scram build -j4 compile_commands.json`.
-- **Python LSP**: pyright (npm) + ruff (static binary).
 - **CLI tools** (`ripgrep`, `fd`, `lazygit`, `ruff`, `viu`): single static musl
   binaries on `/data/mmarriot/tools/bin`, symlinked into `~/.local/bin` - no conda
   (conda dependency trees blow the AFS quota). `install.sh` fetches the latest of each.
-- **The CMSSW machinery** (`:Scope` workspace, `gf`/`<leader>cf` path resolver,
-  `<C-x><C-u>` path completion, `<leader>tt` terminal) is the old vimscript, sourced
-  verbatim from `config/nvim/cmssw.vim`.
 - **Images over ssh**: `viu <file.png>` in a tmux pane. Ghostty speaks the kitty
   graphics protocol; tmux passes it through (`allow-passthrough on`).
 
-Keymaps mirror the Vim tables below. New/changed in nvim: `<leader>e`/`-` open **oil**
-(edit the filesystem as a buffer); `<leader>i` symbol outline (aerial); `<leader>gv`
-diffview (cross-branch diff); `<leader>fr` telescope ripgrep; `<leader>ce` Trouble
-diagnostics; `which-key` shows leader mappings as you type.
+## Colours
 
-> After pulling these changes, reload tmux (`prefix + r`) once so truecolor
-> (`terminal-features RGB`) is active - gruvbox needs it.
+Modus Dusk (Modus colours on a dimmed paper background, every colour >= 4.5:1)
+everywhere: Ghostty on the laptop, `vim/colors/modus_dusk.vim`, the tmux bar, the
+prompt and fzf. Alternatives in `vim/colors`: `modus_tinted` (brighter),
+`gruvbox_soft` (warmer). tmux, the prompt
+and fzf use the terminal's 16 palette colours, so Ghostty's theme sets the exact
+shades; vim uses truecolour. Ghostty draws the cursor (red); vim and bash vi-mode
+only switch its shape: block in normal mode, bar in insert.
 
 ## Install (new machine)
 
@@ -95,7 +82,7 @@ Vim leader is **space**. Tmux prefix is **Ctrl-a**.
 | `<leader>x`        | save |
 | `<leader>es`       | quit window |
 
-### Vim - code (LSP: clangd for C++, pyright for Python)
+### Vim - code (LSP: clangd for C++, pyright for Python, typescript-language-server for TS/JS)
 | key          | action |
 |--------------|--------|
 | `gd`         | go to definition |
@@ -108,6 +95,7 @@ Vim leader is **space**. Tmux prefix is **Ctrl-a**.
 | `Tab`/`S-Tab`| cycle completion popup |
 | `Ctrl-Space` | force completion popup |
 
+TS/JS server: `npm i -g typescript-language-server@5.3.0 typescript@6.0.3` (pyright: `npm i -g pyright`).
 First-time per machine: open a `.cc`/`.py` file and run `:LspInstallServer`; for C++
 also run `scram build -j4 compile_commands.json` so clangd sees your flags.
 
@@ -124,7 +112,7 @@ also run `scram build -j4 compile_commands.json` so clangd sees your flags.
 
 ### Bash - command line (vi mode)
 
-The prompt shows which mode you are in: green `[i]` insert (bar cursor), pink `[n]`
+The prompt shows which mode you are in: green `[i]` insert (bar cursor), accent-coloured `[n]`
 normal (block cursor). All the fzf widgets below work in both modes.
 
 | key            | action |
@@ -156,7 +144,7 @@ normal (block cursor). All the fzf widgets below work in both modes.
 
 Everything below reaches the **Mac's** system clipboard via OSC52 escape sequences sent
 straight through ssh (through tmux's passthrough too, if you're in a session). Needs a
-terminal that honours OSC52 - iTerm2, Alacritty, Kitty and WezTerm all do by default.
+terminal that honours OSC52 - Ghostty does (`clipboard-write = allow`).
 
 | where               | action |
 |---------------------|--------|
