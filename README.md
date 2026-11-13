@@ -13,6 +13,7 @@ vim + tmux + bash config, tuned for CMSSW / performance work on CPU & GPU code.
 | `vim/colors/`         | `~/.vim/colors/`   |
 | `config/tmux/`        | `~/.config/tmux/`  |
 | `config/git/`         | `~/.config/git/`   |
+| `config/clangd/`      | `~/.config/clangd/`|
 
 Plugin managers (vim-plug, TPM) and the plugins they fetch
 (`~/.vim/plugged`, `~/.tmux/plugins`) are *not* stored
@@ -92,12 +93,28 @@ Vim leader is **space**. Tmux prefix is **Ctrl-a**.
 | `<leader>rn` | rename symbol |
 | `<leader>ca` | code action |
 | `]e` / `[e`  | next / previous diagnostic |
-| `Tab`/`S-Tab`| cycle completion popup |
+| `Tab`/`S-Tab`| cycle completion popup; otherwise indent / dedent the line (Visual: the selection) |
 | `Ctrl-Space` | force completion popup |
 
 TS/JS server: `npm i -g typescript-language-server@5.3.0 typescript@6.0.3` (pyright: `npm i -g pyright`).
 First-time per machine: open a `.cc`/`.py` file and run `:LspInstallServer`; for C++
 also run `scram build -j4 compile_commands.json` so clangd sees your flags.
+
+### Vim - indenting
+New lines in C/C++/CUDA get CMSSW's clang-format indent (`public:` in line with the
+class, `: init_(x)` lists, the line after `template <...>`, arguments aligned after `(`);
+Python continuation lines get PEP 8's 4. Enter always makes a new line, even with the
+completion popup open. `Backspace` in the indent removes a whole level.
+
+### Vim - markdown lists
+| key          | action |
+|--------------|--------|
+| `Enter` / `o`| next item (`-` `*` `+` `1.` `1)`; numbers count up, to-dos come back as `- [ ]`) |
+| `Enter` on an empty item | end the list, or move it out a level if nested |
+| `Tab`/`S-Tab`| nest / un-nest the item (numbered items renumber) |
+| `<leader>tt` | tick / untick a to-do; makes a line a to-do (Visual: every line) |
+| `]t` / `[t`  | next / previous unticked to-do |
+| `]]` / `[[`  | next / previous heading |
 
 ### Vim - git (fugitive + gitgutter)
 | key          | action |

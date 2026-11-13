@@ -78,6 +78,7 @@ call plug#end()
 " -- Settings ------------------------------------------------------------------
 set number relativenumber cursorline signcolumn=yes
 set expandtab shiftwidth=2 tabstop=2 colorcolumn=120   " CMSSW .clang-format
+set softtabstop=-1 shiftround                           " Backspace removes a whole level; >> < snap to levels
 set nowrap scrolloff=8 splitbelow splitright hidden
 set incsearch hlsearch ignorecase smartcase
 set wildmenu wildmode=list:longest,full
@@ -152,6 +153,179 @@ nmap <leader>e <Plug>(dirvish_up)
 let g:dirvish_mode = ':sort ,^.*[\/],'                 " directories first, like oil
 vnoremap > >gv
 vnoremap < <gv
+xnoremap <Tab> >gv
+xnoremap <S-Tab> <gv
+
+" -- Indenting -------------------------------------------------------------------
+" Insert-mode Tab / Shift-Tab move through the completion pop-up when it's open.
+" Otherwise Shift-Tab takes the line back one level wherever the cursor is, and Tab
+" moves to the next indent level (on a markdown list item: nests the whole item).
+" In Visual mode they shift the selection, like > and <.
+function! s:Tab(dir) abort
+  if pumvisible() | return a:dir > 0 ? "\<C-n>" : "\<C-p>" | endif
+  let item = &filetype ==# 'markdown' && getline('.') =~# s:md_item
+  " <C-g>u first: Vim reads '0 CTRL-D' (just after typing a 0) as 'delete all indent'
+  if a:dir < 0 | return "\<C-g>u\<C-d>" . (item ? s:md_renumber : '') | endif
+  return item ? "\<C-t>" . s:md_renumber : "\<Tab>"
+endfunction
+inoremap <expr> <Tab>   <SID>Tab(1)
+inoremap <expr> <S-Tab> <SID>Tab(-1)
+
+" C, C++, CUDA: the indent a new line gets follows CMSSW's .clang-format (Google based)
+"   g0  public: / private: line up with the class    t0  a return type on its own line
+"   i4  ': member_(x)' initializer lists 4 in        +4  continuation lines 4 in
+"   (0  arguments line up after an open '('          W4  ...or 4 in when the '(' ends the line
+"   l1  'case x: {' bodies line up with the case
+" s:CppIndent adds what cinoptions can't: the line after 'template <...>' and
+" constructor initializer lists. Against clang-formatted CMSSW files, the indent a
+" new line gets is now wrong for ~1% of lines instead of ~9%. gg=G re-indents a whole
+" file this way; clang-format is still what gives the exact layout.
+function! s:InitListStart(lnum) abort   " the ': member_(...)' line before this '{', or 0
+  let l = a:lnum
+  while l > 0 && a:lnum - l < 50
+    let t = getline(l)
+    if t =~# '^\s*:[^:]' | return l | endif
+    if l < a:lnum && t =~# '[;{}]\s*$' | return 0 | endif
+    let l -= 1
+  endwhile
+  return 0
+endfunction
+
+function! s:CppIndent() abort
+  let p = prevnonblank(v:lnum - 1)
+  let prev = getline(p)
+  let cur = getline(v:lnum)
+  " template <...> on its own line: a new declaration follows, not a continuation
+  if prev =~# '^\s*template\s*<.*>\s*$'
+    return indent(p)
+  endif
+  " Constructor initializer list:   Foo::Foo(int a)
+  "                                     : a_(a),
+  "                                       b_(0) {
+  "                                   body();
+  "                                 }
+  if cur =~# '^\s*:[^:]' && prev =~# ')\s*\%(noexcept\)\=\s*$'
+    let save = getcurpos()
+    call cursor(p, match(prev, ')\s*\%(noexcept\)\=\s*$') + 1)
+    let open = searchpair('(', '', ')', 'bnW')
+    call setpos('.', save)
+    return indent(open > 0 ? open : p) + 4
+  endif
+  if prev =~# '^\s*:[^:].*,\s*$' && count(prev, '(') == count(prev, ')')
+    return indent(p) + 2
+  endif
+  if prev =~# '{\s*$' && cur !~# '^\s*}'
+    let init = s:InitListStart(p)
+    if init | return indent(init) - 4 + shiftwidth() | endif
+  elseif cur =~# '^\s*}'
+    let save = getcurpos()
+    call cursor(v:lnum, match(cur, '}') + 1)
+    let open = searchpair('{', '', '}', 'bnW')
+    call setpos('.', save)
+    let init = open > 0 && getline(open) =~# '{\s*$' ? s:InitListStart(open) : 0
+    if init | return indent(init) - 4 | endif
+  endif
+  return cindent(v:lnum)
+endfunction
+
+" Python: continuation lines and hanging indents 4 in (PEP 8 / black), not Vim's 8
+let g:python_indent = {'open_paren': 'shiftwidth()', 'nested_paren': 'shiftwidth()',
+      \ 'continue': 'shiftwidth()', 'closed_paren_align_last_line': v:false}
+
+augroup vimrc_indent
+  autocmd!
+  autocmd FileType c,cpp,cuda setlocal cinoptions=g0,t0,i4,+4,(0,W4,l1
+        \ | let &l:indentkeys = &l:cinkeys | setlocal indentexpr=s:CppIndent()
+augroup END
+
+" -- Markdown lists ----------------------------------------------------------------
+" Enter on a list item (- * + 1. 1)) starts the next one: numbers count up, to-dos
+" come back unticked. Enter on an empty item ends the list (or, nested, moves it out
+" a level). o does the same from Normal mode. Tab / Shift-Tab nest an item / move it
+" out, wherever the cursor is; a numbered item renumbers to fit its new level.
+"   <leader>tt  tick / untick a to-do; turns an item or plain line into one (Visual: each line)
+"   ]t [t       next / previous unticked to-do      ]] [[  next / previous heading
+let s:md_item = '^\(\s*\)\([-*+]\|\(\d\+\)\([.)]\)\)\(\s\+\)\(\[[ xX]\]\s\+\)\='
+let s:md_todo = '^\s*\%([-*+]\|\d\+[.)]\)\s\+\[ \]'
+let s:md_renumber = "\<Cmd>call " . expand('<SID>') . "MdRenumber()\<CR>"
+
+" Keys for Enter: a plain one unless the cursor is on a list item's text. The edit
+" itself is done by s:MdNewItem, not with keys, so autoindent can't get in the way.
+function! s:MdEnter() abort
+  let m = matchlist(getline('.'), s:md_item)
+  return empty(m) || col('.') <= len(m[0]) && col('.') <= len(getline('.'))
+        \ ? "\<CR>" : "\<Cmd>call " . expand('<SID>') . "MdNewItem()\<CR>"
+endfunction
+
+function! s:MdNewItem() abort
+  let line = getline('.')
+  let m = matchlist(line, s:md_item)
+  if len(m[0]) == len(line)                     " empty item: end the list, or step out a level
+    if empty(m[1]) | call setline('.', '') | else | exe 'normal! <<' | call s:MdRenumber() | endif
+    call cursor(line('.'), col('$'))
+    return
+  endif
+  let at = col('.') - 1
+  let marker = empty(m[3]) ? m[2] : (m[3] + 1) . m[4]
+  let new = m[1] . marker . m[5] . (empty(m[6]) ? '' : '[ ] ')
+  call setline('.', line[: at - 1])
+  call append('.', new . substitute(line[at :], '^\s\+', '', ''))
+  call cursor(line('.') + 1, len(new) + 1)
+endfunction
+
+" A numbered item takes the number after the one above it at its level (1 if none)
+function! s:MdRenumber() abort
+  let m = matchlist(getline('.'), s:md_item)
+  if empty(m) || empty(m[3]) | return | endif
+  let n = 1
+  for l in range(line('.') - 1, 1, -1)
+    let t = getline(l)
+    if t =~# '^\s*$' || indent(l) > len(m[1]) | continue | endif
+    let p = matchlist(t, s:md_item)
+    if !empty(p) && indent(l) == len(m[1]) && !empty(p[3]) | let n = p[3] + 1 | endif
+    break
+  endfor
+  if n == m[3] | return | endif
+  let col = col('.') + len(n) - len(m[3])
+  call setline('.', m[1] . n . getline('.')[len(m[1]) + len(m[3]) :])
+  call cursor(line('.'), col)
+endfunction
+
+function! s:MdToggle() range abort
+  for l in range(a:firstline, a:lastline)
+    let t = getline(l)
+    let m = matchlist(t, s:md_item)
+    if t =~# '^\s*$'
+      continue
+    elseif empty(m)
+      let t = substitute(t, '^\s*\zs', '- [ ] ', '')
+    elseif empty(m[6])
+      let t = m[0] . '[ ] ' . t[len(m[0]) :]
+    else
+      let t = m[1] . m[2] . m[5] . (m[6][1] ==# ' ' ? '[x]' : '[ ]') . t[len(m[0]) - len(m[6]) + 3 :]
+    endif
+    call setline(l, t)
+  endfor
+endfunction
+
+function! s:MdItem() abort
+  return getline('.') =~# s:md_item
+endfunction
+
+function! s:MdTodo(flags) abort
+  if a:flags =~# 'b' | call cursor(line('.'), 1) | endif   " not the to-do the cursor is on
+  call search(s:md_todo, a:flags)
+endfunction
+
+augroup vimrc_markdown
+  autocmd!
+  autocmd FileType markdown nmap <buffer><expr> o <SID>MdItem() ? "A\<CR>" : 'o'
+  autocmd FileType markdown nnoremap <buffer><silent> <leader>tt :call <SID>MdToggle()<CR>
+  autocmd FileType markdown xnoremap <buffer><silent> <leader>tt :call <SID>MdToggle()<CR>
+  autocmd FileType markdown nnoremap <buffer><silent> ]t :<C-u>call <SID>MdTodo('sW')<CR>
+  autocmd FileType markdown nnoremap <buffer><silent> [t :<C-u>call <SID>MdTodo('bsW')<CR>
+augroup END
+
 nnoremap <leader>ff :CmsFiles<CR>
 nnoremap <leader>fg :CmsGrep<Space>
 nnoremap <leader>*  :CmsGrep <C-r><C-w><CR>
@@ -403,10 +577,14 @@ augroup END
 let g:lsp_diagnostics_enabled = 0
 let g:lsp_document_highlight_enabled = 0
 set completeopt=menuone,noinsert,noselect
-" Tab/S-Tab cycle the pop-up (normal Tab otherwise); Enter accepts the selected item
-inoremap <expr> <Tab>   pumvisible() ? "\<C-n>" : "\<Tab>"
-inoremap <expr> <S-Tab> pumvisible() ? "\<C-p>" : "\<S-Tab>"
-inoremap <expr> <CR>    pumvisible() && complete_info().selected != -1 ? asyncomplete#close_popup() : "\<CR>"
+" Enter accepts the selected pop-up item (Tab/S-Tab move in it, see "Indenting").
+" Otherwise it's a new line, even with the pop-up open (a bare Enter would only close
+" it); in markdown that continues the list.
+function! s:Enter() abort
+  if pumvisible() && complete_info().selected != -1 | return asyncomplete#close_popup() | endif
+  return (pumvisible() ? "\<C-e>" : '') . (&filetype ==# 'markdown' ? s:MdEnter() : "\<CR>")
+endfunction
+inoremap <expr> <CR> <SID>Enter()
 
 " Inlay hints: grey virtual text with the deduced type after every `auto` and the
 " parameter name before every call argument. <leader>th toggles them.

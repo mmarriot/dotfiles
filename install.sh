@@ -29,6 +29,7 @@ link bashrc        .bashrc
 link gitconfig     .gitconfig
 link config/tmux   .config/tmux
 link config/git    .config/git
+link config/clangd .config/clangd
 link vim/colors    .vim/colors
 
 # -- vim-plug --------------------------------------------------------------
