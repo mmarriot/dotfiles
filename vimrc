@@ -54,6 +54,12 @@
 "   <leader>cE  pick which asm* prompt to ask (they're in g:ask_prompts below); <leader>o goes into
 "               the answer, from the pane too
 "   <leader>cg  rebuild just this file with -g so x86 has line tables (:CmsDebugLog)   :help cmssw
+"
+" Notes (working beside the code; on screen only, never in the file, gone with the buffer):
+"   <leader>n   notes mode: the code is locked and   o  writes a note under the line
+"               A  a note beside it   dd  deletes the line's notes   <leader>n  leaves
+"               You type the note in a small window below; it's drawn as you type, :q when done
+"   <leader>N   hide / show the notes
 
 " cmsenv sets LANG=C, which would make Vim latin1 and lose every non-ASCII character
 set encoding=utf-8
@@ -88,7 +94,7 @@ set backspace=indent,eol,start
 set diffopt-=inline:char diffopt+=inline:word            " mark whole changed words, not scattered letters
 set ttimeout ttimeoutlen=50                             " no lag after Esc
 set laststatus=2
-set statusline=\ %f\ %m%r%{FugitiveHead()!=''?'\ \ ('.FugitiveHead().')':''}%=%y\ %l:%c
+set statusline=\ %f\ %m%r%{get(b:,'notes_mode')?'\ [notes]':''}%{FugitiveHead()!=''?'\ \ ('.FugitiveHead().')':''}%=%y\ %l:%c
 
 " -- Colours ---------------------------------------------------------------------
 " True colour: tmux passes it on once tmux.conf has the Tc override. The two
@@ -679,6 +685,139 @@ augroup vimrc_lsp_more
   endif
   autocmd User lsp_buffer_enabled call s:LspBuffer()
 augroup END
+
+" -- Notes: virtual text beside the code ---------------------------------------------
+" A note is drawn with text properties that carry a 'text' (virtual text): vim shows
+" it in the window but it isn't in the buffer, so :w, yanks, git and clangd never see
+" it and it doesn't mark the buffer modified. Each note hangs off a zero-width
+" 'note_anchor' property on its line, so it moves with the code; dd on that line takes
+" the note away and u brings it back. b:notes holds the text, by anchor id:
+" {'where': 'below' or 'after', 'lines': [...]}. Nothing is saved anywhere.
+let s:note_id = get(s:, 'note_id', 0)   " kept on :source, so new ids never reuse a live note's
+
+" Colour schemes start with :hi clear, which drops NoteText, so set it again after each
+function! s:NoteColours() abort
+  hi NoteText guifg=#004c50 guibg=#c3d3cc ctermfg=23 ctermbg=152 cterm=NONE gui=NONE
+endfunction
+call s:NoteColours()
+augroup vimrc_notes
+  autocmd!
+  autocmd ColorScheme * call s:NoteColours()
+augroup END
+" after NoteText exists: a type made with an unknown highlight group gets no colour
+if empty(prop_type_get('note_anchor'))
+  call prop_type_add('note_anchor', {})
+  call prop_type_add('note_below', {'highlight': 'NoteText'})
+  call prop_type_add('note_after', {'highlight': 'NoteText'})
+endif
+
+" Redraw all of buffer buf's notes from b:notes (none while they're hidden)
+function! s:NotesDraw(buf) abort
+  call prop_remove({'type': 'note_below', 'bufnr': a:buf, 'all': 1})
+  call prop_remove({'type': 'note_after', 'bufnr': a:buf, 'all': 1})
+  if getbufvar(a:buf, 'notes_hidden') | return | endif
+  let notes = getbufvar(a:buf, 'notes', {})
+  for a in prop_list(1, {'bufnr': a:buf, 'end_lnum': -1, 'types': ['note_anchor']})
+    let note = notes[a.id]
+    if note.where ==# 'after'
+      call prop_add(a.lnum, 0, {'bufnr': a:buf, 'type': 'note_after', 'text': join(note.lines, '  '),
+            \ 'text_align': 'after', 'text_padding_left': 2})
+      continue
+    endif
+    " under the line, lined up with its indent
+    let pad = strdisplaywidth(matchstr(getbufline(a:buf, a.lnum)[0], '^\s*'))
+    for line in note.lines
+      call prop_add(a.lnum, 0, {'bufnr': a:buf, 'type': 'note_below', 'text': line,
+            \ 'text_align': 'below', 'text_padding_left': pad, 'text_wrap': 'wrap'})
+    endfor
+  endfor
+endfunction
+
+" The anchor id of this line's note that goes `where`, 0 if it has none
+function! s:NoteAt(lnum, where) abort
+  for a in prop_list(a:lnum, {'types': ['note_anchor']})
+    if b:notes[a.id].where ==# a:where | return a.id | endif
+  endfor
+  return 0
+endfunction
+
+" Edit this line's note that goes `where` (a new one if there's none) in a small window
+" below. It's drawn as you type; :q leaves, and an emptied note is deleted.
+function! s:NoteEdit(where) abort
+  let id = s:NoteAt(line('.'), a:where)
+  if !id
+    let s:note_id += 1
+    let id = s:note_id
+    call prop_add(line('.'), 1, {'type': 'note_anchor', 'id': id, 'length': 0})
+    let b:notes[id] = {'where': a:where, 'lines': ['']}
+  endif
+  let buf = bufnr()
+  let lines = b:notes[id].lines
+  execute 'belowright' max([4, len(lines) + 2]) 'new'
+  setlocal buftype=nofile bufhidden=wipe noswapfile
+  execute 'silent! file note-' . id
+  call setline(1, lines)
+  let b:note = [buf, id]
+  autocmd TextChanged,TextChangedI <buffer> call s:NoteSave(bufnr(), 0)
+  autocmd BufWinLeave <buffer> call s:NoteSave(str2nr(expand('<abuf>')), 1)
+  startinsert!
+endfunction
+
+" Copy the editing window's text (buffer nb) into its note and redraw
+function! s:NoteSave(nb, closing) abort
+  let [buf, id] = getbufvar(a:nb, 'note')
+  let notes = getbufvar(buf, 'notes')
+  if !has_key(notes, id) | return | endif     " deleted with dd meanwhile
+  let lines = getbufline(a:nb, 1, '$')
+  if a:closing
+    while !empty(lines) && lines[-1] =~ '^\s*$' | call remove(lines, -1) | endwhile
+    if empty(lines)
+      call remove(notes, id)
+      call prop_remove({'type': 'note_anchor', 'id': id, 'both': 1, 'bufnr': buf})
+    endif
+  endif
+  if has_key(notes, id) | let notes[id].lines = lines | endif
+  call s:NotesDraw(buf)
+endfunction
+
+function! s:NotesDelete() abort
+  for a in prop_list(line('.'), {'types': ['note_anchor']})
+    call remove(b:notes, a.id)
+  endfor
+  call prop_remove({'type': 'note_anchor', 'all': 1}, line('.'))
+  call s:NotesDraw(bufnr())
+endfunction
+
+" Notes mode: lock the code and give o / A / dd to the notes, or hand them back
+function! s:NotesMode() abort
+  if get(b:, 'notes_mode')
+    let b:notes_mode = 0
+    let &l:modifiable = b:notes_modifiable
+    silent! nunmap <buffer> o
+    silent! nunmap <buffer> A
+    silent! nunmap <buffer> dd
+    echo 'Notes mode off'
+    return
+  endif
+  let b:notes_mode = 1
+  let b:notes_modifiable = &l:modifiable
+  let b:notes = get(b:, 'notes', {})
+  let b:notes_hidden = 0
+  setlocal nomodifiable
+  call s:NotesDraw(bufnr())
+  nnoremap <buffer> o <Cmd>call <SID>NoteEdit('below')<CR>
+  nnoremap <buffer> A <Cmd>call <SID>NoteEdit('after')<CR>
+  nnoremap <buffer> dd <Cmd>call <SID>NotesDelete()<CR>
+  echo 'Notes mode: o note under the line, A beside it, dd delete, <leader>n leave'
+endfunction
+
+function! s:NotesHide() abort
+  let b:notes_hidden = !get(b:, 'notes_hidden')
+  call s:NotesDraw(bufnr())
+endfunction
+
+nnoremap <leader>n <Cmd>call <SID>NotesMode()<CR>
+nnoremap <leader>N <Cmd>call <SID>NotesHide()<CR>
 
 " -- Ask Claude (vim-ask) ----------------------------------------------------------
 " Saved prompts: <leader>p picks one, :Ask -name runs one, <leader>I with "-name ..." uses
