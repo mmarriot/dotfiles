@@ -56,9 +56,10 @@
 "   <leader>cg  rebuild just this file with -g so x86 has line tables (:CmsDebugLog)   :help cmssw
 "
 " Notes (working beside the code; on screen only, never in the file, gone with the buffer):
-"   <leader>n   notes mode: the code is locked and   o  writes a note under the line
-"               A  a note beside it   dd  deletes the line's notes   <leader>n  leaves
-"               You type the note in a small window below; it's drawn as you type, :q when done
+"   <leader>n   notes mode: the code is locked and   o  types a note under the line
+"               A  a note beside it   (straight in: Enter new line, Backspace, Ctrl-K digraph
+"               like a* α, Esc done)   e  edit the line's note in a window with all of vim, q closes
+"               dd  deletes the line's notes   <leader>n  leaves
 "   <leader>N   hide / show the notes
 
 " cmsenv sets LANG=C, which would make Vim latin1 and lose every non-ASCII character
@@ -719,14 +720,16 @@ function! s:NotesDraw(buf) abort
   let notes = getbufvar(a:buf, 'notes', {})
   for a in prop_list(1, {'bufnr': a:buf, 'end_lnum': -1, 'types': ['note_anchor']})
     let note = notes[a.id]
+    " the note being typed into gets a cursor at its end
+    let lines = get(note, 'typing') ? note.lines[:-2] + [note.lines[-1] . '▏'] : note.lines
     if note.where ==# 'after'
-      call prop_add(a.lnum, 0, {'bufnr': a:buf, 'type': 'note_after', 'text': join(note.lines, '  '),
+      call prop_add(a.lnum, 0, {'bufnr': a:buf, 'type': 'note_after', 'text': join(lines, '  '),
             \ 'text_align': 'after', 'text_padding_left': 2})
       continue
     endif
     " under the line, lined up with its indent
     let pad = strdisplaywidth(matchstr(getbufline(a:buf, a.lnum)[0], '^\s*'))
-    for line in note.lines
+    for line in lines
       call prop_add(a.lnum, 0, {'bufnr': a:buf, 'type': 'note_below', 'text': line,
             \ 'text_align': 'below', 'text_padding_left': pad, 'text_wrap': 'wrap'})
     endfor
@@ -741,9 +744,8 @@ function! s:NoteAt(lnum, where) abort
   return 0
 endfunction
 
-" Edit this line's note that goes `where` (a new one if there's none) in a small window
-" below. It's drawn as you type; :q leaves, and an emptied note is deleted.
-function! s:NoteEdit(where) abort
+" This line's note that goes `where`, made (empty) if it has none
+function! s:NoteGet(where) abort
   let id = s:NoteAt(line('.'), a:where)
   if !id
     let s:note_id += 1
@@ -751,6 +753,69 @@ function! s:NoteEdit(where) abort
     call prop_add(line('.'), 1, {'type': 'note_anchor', 'id': id, 'length': 0})
     let b:notes[id] = {'where': a:where, 'lines': ['']}
   endif
+  return id
+endfunction
+
+" Done with note id of buffer buf: drop its trailing blank lines, and the note if that empties it
+function! s:NoteDone(buf, id) abort
+  let notes = getbufvar(a:buf, 'notes')
+  let lines = notes[a:id].lines
+  while !empty(lines) && lines[-1] =~ '^\s*$' | call remove(lines, -1) | endwhile
+  if empty(lines)
+    call remove(notes, a:id)
+    call prop_remove({'type': 'note_anchor', 'id': a:id, 'both': 1, 'bufnr': a:buf})
+  endif
+  call s:NotesDraw(a:buf)
+endfunction
+
+" Type straight into this line's note that goes `where`: o adds a line to the note under
+" the code, A carries on the one beside it. Each key goes into the note's text, never the
+" buffer: Enter starts a new line (ends a note beside the code), Backspace deletes, Ctrl-U
+" clears the line, Ctrl-K + two keys is a digraph (a* α, S* Σ, -> →, =< ≤; :digraphs), Esc ends.
+function! s:NoteType(where) abort
+  let buf = bufnr()
+  let id = s:NoteGet(a:where)
+  let note = b:notes[id]
+  if a:where ==# 'below' && note.lines != [''] | call add(note.lines, '') | endif
+  let note.typing = 1
+  try
+    while 1
+      call s:NotesDraw(buf)
+      redraw
+      echo '-- NOTE --  Enter new line, Backspace delete, Esc done'
+      let c = getcharstr()
+      let lines = note.lines
+      if c ==# "\<Esc>" || (c ==# "\<CR>" && a:where ==# 'after')
+        break
+      elseif c ==# "\<CR>"
+        call add(lines, '')
+      elseif c ==# "\<BS>" || c ==# "\<C-h>"
+        if lines[-1] ==# '' && len(lines) > 1
+          call remove(lines, -1)
+        else
+          let lines[-1] = strcharpart(lines[-1], 0, strchars(lines[-1]) - 1)
+        endif
+      elseif c ==# "\<C-u>"
+        let lines[-1] = ''
+      elseif c ==# "\<C-k>"
+        silent! let lines[-1] .= digraph_get(getcharstr() . getcharstr())
+      elseif c =~# '^\p\+$'     " printable, which leaves out arrows and other special keys
+        let lines[-1] .= c
+      endif
+    endwhile
+  finally                         " also on Ctrl-C
+    unlet note.typing
+    call s:NoteDone(buf, id)
+    redraw                        " property changes alone don't repaint, so the cursor would linger
+    echo ''
+  endtry
+endfunction
+
+" Edit this line's note (the one under it if there are both) in a small window below,
+" with all of vim's editing. It's drawn as you type; q closes the window.
+function! s:NoteEdit() abort
+  let where = s:NoteAt(line('.'), 'after') && !s:NoteAt(line('.'), 'below') ? 'after' : 'below'
+  let id = s:NoteGet(where)
   let buf = bufnr()
   let lines = b:notes[id].lines
   execute 'belowright' max([4, len(lines) + 2]) 'new'
@@ -758,9 +823,9 @@ function! s:NoteEdit(where) abort
   execute 'silent! file note-' . id
   call setline(1, lines)
   let b:note = [buf, id]
+  nnoremap <buffer> q <Cmd>close<CR>
   autocmd TextChanged,TextChangedI <buffer> call s:NoteSave(bufnr(), 0)
   autocmd BufWinLeave <buffer> call s:NoteSave(str2nr(expand('<abuf>')), 1)
-  startinsert!
 endfunction
 
 " Copy the editing window's text (buffer nb) into its note and redraw
@@ -768,16 +833,8 @@ function! s:NoteSave(nb, closing) abort
   let [buf, id] = getbufvar(a:nb, 'note')
   let notes = getbufvar(buf, 'notes')
   if !has_key(notes, id) | return | endif     " deleted with dd meanwhile
-  let lines = getbufline(a:nb, 1, '$')
-  if a:closing
-    while !empty(lines) && lines[-1] =~ '^\s*$' | call remove(lines, -1) | endwhile
-    if empty(lines)
-      call remove(notes, id)
-      call prop_remove({'type': 'note_anchor', 'id': id, 'both': 1, 'bufnr': buf})
-    endif
-  endif
-  if has_key(notes, id) | let notes[id].lines = lines | endif
-  call s:NotesDraw(buf)
+  let notes[id].lines = getbufline(a:nb, 1, '$')
+  if a:closing | call s:NoteDone(buf, id) | else | call s:NotesDraw(buf) | endif
 endfunction
 
 function! s:NotesDelete() abort
@@ -788,13 +845,14 @@ function! s:NotesDelete() abort
   call s:NotesDraw(bufnr())
 endfunction
 
-" Notes mode: lock the code and give o / A / dd to the notes, or hand them back
+" Notes mode: lock the code and give o / A / e / dd to the notes, or hand them back
 function! s:NotesMode() abort
   if get(b:, 'notes_mode')
     let b:notes_mode = 0
     let &l:modifiable = b:notes_modifiable
     silent! nunmap <buffer> o
     silent! nunmap <buffer> A
+    silent! nunmap <buffer> e
     silent! nunmap <buffer> dd
     echo 'Notes mode off'
     return
@@ -805,10 +863,11 @@ function! s:NotesMode() abort
   let b:notes_hidden = 0
   setlocal nomodifiable
   call s:NotesDraw(bufnr())
-  nnoremap <buffer> o <Cmd>call <SID>NoteEdit('below')<CR>
-  nnoremap <buffer> A <Cmd>call <SID>NoteEdit('after')<CR>
+  nnoremap <buffer> o <Cmd>call <SID>NoteType('below')<CR>
+  nnoremap <buffer> A <Cmd>call <SID>NoteType('after')<CR>
+  nnoremap <buffer> e <Cmd>call <SID>NoteEdit()<CR>
   nnoremap <buffer> dd <Cmd>call <SID>NotesDelete()<CR>
-  echo 'Notes mode: o note under the line, A beside it, dd delete, <leader>n leave'
+  echo 'Notes mode: o note under the line, A beside it, e edit in a window, dd delete, <leader>n leave'
 endfunction
 
 function! s:NotesHide() abort
